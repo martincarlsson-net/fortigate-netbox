@@ -15,7 +15,8 @@ class CacheManager:
         
         Args:
             cache_dir: Directory to store cache files
-            use_cache: If True, use cached data instead of making API calls
+            use_cache: If True, try to use cached data; if False, always fetch fresh data
+                      Note: Data is ALWAYS cached when fetched, regardless of this flag
         """
         self.cache_dir = Path(cache_dir)
         self.use_cache = use_cache
@@ -24,7 +25,11 @@ class CacheManager:
         # Create cache directory if it doesn't exist
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        self.logger.info(f"CacheManager initialized: use_cache={use_cache}, cache_dir={cache_dir}")
+        if use_cache:
+            self.logger.info(f"🔵 Cache mode: READ from cache when available")
+        else:
+            self.logger.info(f"🟢 Cache mode: ALWAYS fetch fresh data (but will cache it)")
+        self.logger.info(f"📁 Cache directory: {cache_dir}")
     
     def _get_cache_file(self, cache_key: str) -> Path:
         """Get the path to a cache file."""
@@ -41,12 +46,13 @@ class CacheManager:
             Cached data if available and use_cache is True, None otherwise
         """
         if not self.use_cache:
+            self.logger.debug(f"Cache disabled, skipping read for: {cache_key}")
             return None
         
         cache_file = self._get_cache_file(cache_key)
         
         if not cache_file.exists():
-            self.logger.info(f"Cache miss: {cache_key} (file not found)")
+            self.logger.info(f"📭 Cache miss: {cache_key} (file not found)")
             return None
         
         try:
@@ -55,15 +61,15 @@ class CacheManager:
             
             # Get file modification time
             mtime = datetime.fromtimestamp(cache_file.stat().st_mtime)
-            self.logger.info(f"Cache hit: {cache_key} (cached on {mtime.strftime('%Y-%m-%d %H:%M:%S')})")
+            self.logger.info(f"✅ Cache hit: {cache_key} (cached on {mtime.strftime('%Y-%m-%d %H:%M:%S')})")
             return data
         except Exception as e:
-            self.logger.error(f"Error reading cache file {cache_key}: {e}")
+            self.logger.error(f"❌ Error reading cache file {cache_key}: {e}")
             return None
     
     def set(self, cache_key: str, data: Any) -> None:
         """
-        Store data in cache.
+        Store data in cache. This ALWAYS happens regardless of use_cache flag.
         
         Args:
             cache_key: Unique identifier for the cached data
@@ -74,22 +80,26 @@ class CacheManager:
         try:
             with open(cache_file, 'wb') as f:
                 pickle.dump(data, f)
-            self.logger.info(f"Cached data saved: {cache_key} ({cache_file.stat().st_size} bytes)")
+            
+            size_kb = round(cache_file.stat().st_size / 1024, 2)
+            self.logger.info(f"💾 Cached: {cache_key} ({size_kb} KB)")
         except Exception as e:
-            self.logger.error(f"Error writing cache file {cache_key}: {e}")
+            self.logger.error(f"❌ Error writing cache file {cache_key}: {e}")
     
     def delete(self, cache_key: str) -> None:
         """Delete a cache file."""
         cache_file = self._get_cache_file(cache_key)
         if cache_file.exists():
             cache_file.unlink()
-            self.logger.info(f"Cache deleted: {cache_key}")
+            self.logger.info(f"🗑️  Cache deleted: {cache_key}")
     
     def clear_all(self) -> None:
         """Delete all cache files."""
+        count = 0
         for cache_file in self.cache_dir.glob("*.pickle"):
             cache_file.unlink()
-        self.logger.info("All cache files deleted")
+            count += 1
+        self.logger.info(f"🗑️  Deleted {count} cache files")
     
     def list_cache_files(self) -> list[dict]:
         """List all cache files with metadata."""
