@@ -1,11 +1,32 @@
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_netbox_url(url: str) -> str:
+    """
+    Normalize NETBOX_URL and ensure it has a host.
+
+    Fixes common typos like https:///netbox.example.com (extra slash) which
+    cause requests to raise "Invalid URL: No host supplied".
+    """
+    u = url.strip().rstrip("/")
+    # Collapse extra slashes after :// (e.g. https:///host -> https://host)
+    u = re.sub(r"(https?):///+", r"\1://", u)
+    parsed = urlparse(u)
+    if not parsed.netloc:
+        raise RuntimeError(
+            f"NETBOX_URL has no host: {url!r}. "
+            "Use e.g. https://netbox.example.com (no extra slashes)."
+        )
+    return u
 
 
 @dataclass
@@ -95,6 +116,7 @@ def load_settings() -> Settings:
     netbox_url = os.getenv("NETBOX_URL")
     if not netbox_url:
         raise RuntimeError("NETBOX_URL not set.")
+    netbox_url = _normalize_netbox_url(netbox_url)
 
     nb_token_file = os.getenv("NETBOX_API_TOKEN_FILE", "secrets/netbox_api_token")
     nb_token = _read_secret_file(nb_token_file) or os.getenv("NETBOX_API_TOKEN")
@@ -111,7 +133,7 @@ def load_settings() -> Settings:
 
     return Settings(
         fortigate_devices=fortigate_devices,
-        netbox_url=netbox_url.rstrip("/"),
+        netbox_url=netbox_url,
         netbox_api_token=nb_token,
         sync_data_dir=sync_data_dir,
         log_level=log_level,
