@@ -5,6 +5,8 @@ import requests
 
 from .models import Switch, SwitchPort
 
+from cache_manager import CacheManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -15,10 +17,11 @@ class FortiGateClient:
     - Normalizing it into Switch/SwitchPort models
     """
 
-    def __init__(self, host: str, api_token: str, verify_ssl: bool = True) -> None:
+    def __init__(self, host: str, username: str, password: str, verify_ssl: bool = True, cache_manager: Optional[CacheManager] = None):
         self.base_url = f"https://{host}"
         self.session = requests.Session()
         self.session.verify = verify_ssl
+        self.cache_manager = cache_manager
         # FortiOS token via header (preferred)
         self.session.headers.update(
             {
@@ -35,50 +38,86 @@ class FortiGateClient:
         resp.raise_for_status()
         return resp.json()
 
-    def get_managed_switches_raw(self) -> Dict[str, Any]:
-        """
-        GET /api/v2/cmdb/switch-controller/managed-switch/
 
-        Returns the raw JSON from FortiGate.
-        """
-        return self._get("/api/v2/cmdb/switch-controller/managed-switch/")
+    def get_managed_switches(self) -> list[dict]:
+        """Get all managed FortiSwitch devices with caching support."""
+        cache_key = f"fortigate_{self.host}_managed_switches"
+        
+        # Try to get from cache first
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                self.logger.info(f"Using cached FortiSwitch data for {self.host}")
+                return cached_data
+        
+        # Make API call
+        self.logger.info(f"Fetching FortiSwitch data from {self.host} API")
+        response = self.session.get(
+            f"{self.base_url}/api/v2/monitor/switch-controller/managed-switch/select",
+            verify=self.verify_ssl
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        switches = data.get("results", [])
+        
+        # Cache the result
+        if self.cache_manager:
+            self.cache_manager.set(cache_key, switches)
+        
+        return switches
 
     @staticmethod
-    def _normalize_vlan_names(port: Dict[str, Any]) -> Dict[str, Any]:
+    def _normalize_vlan_names(self, ports: list[dict]) -> list[dict]:
         """
-        Extract native VLAN and allowed VLANs from a FortiGate port dict.
-
-        Rules:
-        - native_vlan: from "vlan" only (string, e.g. "vlan90"). Do not use
-          "untagged-vlans"; that can differ from the port's native VLAN.
-        - allowed_vlans:
-          - If "allowed-vlans-all" == "enable": ["*"] (all VLANs allowed).
-          - Else: "allowed-vlans[].vlan-name". If empty and we have a
-            native_vlan, treat as access port: allowed_vlans = [native_vlan].
+        Normalize VLAN names to match NetBox format.
+        
+        Args:
+            ports: List of port dictionaries from FortiGate
+            
+        Returns:
+            List of normalized port dictionaries
         """
-        vlan_field = port.get("vlan")
-        native_name = vlan_field if isinstance(vlan_field, str) and vlan_field else None
-
-        allowed_vlans: List[str] = []
-        if port.get("allowed-vlans-all") == "enable":
-            # "all VLANs allowed" – cannot easily compare to NetBox,
-            # but we use a sentinel so validator can log a warning.
-            allowed_vlans = ["*"]
-        else:
-            allowed_list = port.get("allowed-vlans") or []
-            for item in allowed_list:
-                name = item.get("vlan-name") or item.get("name")
-                if name:
-                    allowed_vlans.append(name)
-
-        if not allowed_vlans and native_name:
-            # Typical access port: only one untagged/native VLAN
-            allowed_vlans = [native_name]
-
-        return {
-            "native_vlan": native_name,
-            "allowed_vlans": allowed_vlans,
-        }
+        normalized = []
+        
+        for i, port in enumerate(ports):
+            # DEBUG: Print full port dictionary for first port
+            if i == 0:
+                self.logger.info(f"First port full dictionary: {json.dumps(port, indent=2)}")
+            
+            normalized_port = {
+                'name': port.get('port-name', ''),
+                'description': port.get('description', ''),
+                'enabled': port.get('status', 'down') == 'up',
+                'type': port.get('type', 'physical'),
+            }
+            
+            # Get native VLAN from the 'vlan' field (NOT from untagged-vlans)
+            native_vlan_name = port.get('vlan', '')
+            if native_vlan_name:
+                # Convert vlan90 -> VLAN-90 format
+                if native_vlan_name.startswith('vlan') and native_vlan_name[4:].isdigit():
+                    vlan_id = native_vlan_name[4:]
+                    normalized_port['native_vlan'] = f"VLAN-{vlan_id}"
+                else:
+                    normalized_port['native_vlan'] = native_vlan_name
+            
+            # Get allowed VLANs from allowed-vlans array
+            allowed_vlans = []
+            for vlan_obj in port.get('allowed-vlans', []):
+                vlan_name = vlan_obj.get('vlan-name', '')
+                if vlan_name:
+                    # Convert vlan90 -> VLAN-90 format
+                    if vlan_name.startswith('vlan') and vlan_name[4:].isdigit():
+                        vlan_id = vlan_name[4:]
+                        allowed_vlans.append(f"VLAN-{vlan_id}")
+                    else:
+                        allowed_vlans.append(vlan_name)
+            
+            normalized_port['allowed_vlans'] = allowed_vlans
+            normalized.append(normalized_port)
+        
+        return normalized
 
     def get_switches(self) -> List[Switch]:
         """

@@ -44,7 +44,8 @@ class Settings:
     netbox_api_token: str
     sync_data_dir: Path
     log_level: str = "INFO"
-
+    use_cached_data: bool = False  # New field
+    cache_dir: str = "/app/data/cache"  # New field
 
 def _read_secret_file(path: Optional[str]) -> Optional[str]:
     if not path:
