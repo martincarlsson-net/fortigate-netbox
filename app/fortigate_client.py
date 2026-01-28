@@ -8,7 +8,9 @@ from .models import Switch, SwitchPort
 from cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
-
+import json
+from typing import Optional
+from app.cache_manager import CacheManager  # Correct import path
 
 class FortiGateClient:
     """
@@ -16,27 +18,30 @@ class FortiGateClient:
     - Fetching managed switch data
     - Normalizing it into Switch/SwitchPort models
     """
-
-    def __init__(self, host: str, username: str, password: str, verify_ssl: bool = True, cache_manager: Optional[CacheManager] = None):
-        self.base_url = f"https://{host}"
-        self.session = requests.Session()
-        self.session.verify = verify_ssl
+    def __init__(
+        self, 
+        host: str, 
+        username: str, 
+        password: str, 
+        verify_ssl: bool = True, 
+        cache_manager: Optional[CacheManager] = None
+    ):
+        self.host = host
+        self.username = username
+        self.password = password
+        self.verify_ssl = verify_ssl
         self.cache_manager = cache_manager
-        # FortiOS token via header (preferred)
-        self.session.headers.update(
-            {
-                "Authorization": f"Bearer {api_token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-        )
-
+        self.base_url = f"https://{host}"
+        self.session = None
+        self.logger = logging.getLogger(f"{__name__}.{host}")
+    
     def _get(self, path: str) -> Dict[str, Any]:
         url = f"{self.base_url}{path}"
         logger.info("Requesting FortiGate endpoint %s", url)
         resp = self.session.get(url, timeout=15)
         resp.raise_for_status()
         return resp.json()
+
 
 
     def get_managed_switches(self) -> list[dict]:
@@ -50,6 +55,22 @@ class FortiGateClient:
                 self.logger.info(f"Using cached FortiSwitch data for {self.host}")
                 return cached_data
         
+        # Make API call
+        self.logger.info(f"Fetching FortiSwitch data from {self.host} API")
+        response = self.session.get(
+            f"{self.base_url}/api/v2/monitor/switch-controller/managed-switch/select",
+            verify=self.verify_ssl
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        switches = data.get("results", [])
+        
+        # Cache the result
+        if self.cache_manager:
+            self.cache_manager.set(cache_key, switches)
+        
+        return switches
         # Make API call
         self.logger.info(f"Fetching FortiSwitch data from {self.host} API")
         response = self.session.get(
