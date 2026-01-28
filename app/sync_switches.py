@@ -1,6 +1,6 @@
 import logging
 import sys
-from typing import List
+from typing import List, Optional
 
 from .config import Settings
 from .fortigate_client import FortiGateClient
@@ -28,7 +28,7 @@ def _switch_from_dict(data: dict) -> Switch:
     )
 
 
-def run_sync(settings: Settings) -> int:
+def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> int:
     """
     Main synchronization flow:
     1) Clear stored data.
@@ -36,6 +36,7 @@ def run_sync(settings: Settings) -> int:
     3) Iterate stored switches and compare VLANs with NetBox.
 
     Behavior:
+    - If only_switch_name is provided, only that switch is validated.
     - If a switch cannot be found in NetBox (by name), stop execution and
       print concise details about the missing switch.
     - No changes are made to NetBox; only validation and reporting.
@@ -62,10 +63,36 @@ def run_sync(settings: Settings) -> int:
             )
             return 1
 
+        # If requested, only store the matching switch (case-sensitive match on name).
+        if only_switch_name:
+            switches = [sw for sw in switches if sw.name == only_switch_name]
+            if not switches:
+                logger.info(
+                    "TEST_SWITCH=%s: no matching switches found on FortiGate %s",
+                    only_switch_name,
+                    fg.name,
+                )
+
         save_switches_for_device(settings.sync_data_dir, fg.name, switches)
 
     # 3) Iterate stored switches and compare with NetBox
     switches_raw = load_all_switches(settings.sync_data_dir)
+
+    # If requested, filter stored switches as well (defensive if storage ever changes).
+    if only_switch_name:
+        switches_raw = [sw for sw in switches_raw if sw.get("name") == only_switch_name]
+
+        if not switches_raw:
+            logger.error(
+                "Switch %s not found on any configured FortiGate (after collection).",
+                only_switch_name,
+            )
+            print(
+                f"Switch not found on any FortiGate: name={only_switch_name}",
+                file=sys.stderr,
+            )
+            return 1
+
     nb_client = NetBoxClient(settings.netbox_url, settings.netbox_api_token)
 
     for sw_dict in switches_raw:
@@ -95,4 +122,3 @@ def run_sync(settings: Settings) -> int:
         validate_switch_vlans(switch_obj, interfaces)
 
     return 0
-
