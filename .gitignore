@@ -23,5 +23,3 @@ fortigate_devices.json
 # Docker / logs
 *.log
 docker-compose.override.yml
-
-env.production
