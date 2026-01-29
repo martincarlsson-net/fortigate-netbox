@@ -7,6 +7,7 @@ from .fortigate_client import FortiGateClient
 from .models import Switch
 from .netbox_client import NetBoxClient
 from .vlan_validator import validate_switch_vlans
+from .cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 

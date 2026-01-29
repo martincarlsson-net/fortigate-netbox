@@ -4,13 +4,13 @@ from typing import Any, Dict, List
 import requests
 
 from .models import Switch, SwitchPort
+from .cache_manager import CacheManager
 
-from cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 import json
 from typing import Optional
-from app.cache_manager import CacheManager  # Correct import path
+
 
 class FortiGateClient:
     """
