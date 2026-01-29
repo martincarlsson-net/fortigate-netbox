@@ -1,9 +1,8 @@
 import logging
 from typing import Any, Dict, List, Optional
-from cache_manager import CacheManager
 import requests
 from typing import Optional
-from app.cache_manager import CacheManager  # Correct import path
+from .cache_manager import CacheManager  
 import time
 from requests.exceptions import ReadTimeout, ConnectionError
 logger = logging.getLogger(__name__)
