@@ -33,6 +33,53 @@ Python application to validate and (in future versions) synchronize switch port 
   - Configures logging.
   - Executes `run_sync` and exits with its return code.
 
+### Configuration
+
+#### Environment Variables
+
+The application is configured via environment variables, typically loaded from an `env.production` file using Docker's `--env-file` flag.
+
+**Required Variables:**
+
+- `FG_DEVICES_FILE`: Path to the FortiGate devices JSON file (default: `fortigate_devices.json`)
+- `NETBOX_URL`: Base URL of your NetBox instance (e.g., `https://netbox.example.com`)
+- `NETBOX_API_TOKEN`: NetBox API token (direct value). If not set, falls back to `NETBOX_API_TOKEN_FILE`
+
+**Optional Variables:**
+
+- `NETBOX_API_TOKEN_FILE`: Path to file containing NetBox API token (default: `secrets/netbox_api_token`). Used only if `NETBOX_API_TOKEN` is not set.
+- `NETBOX_TIMEOUT`: API request timeout in seconds (default: `120`)
+- `SYNC_DATA_DIR`: Directory for storing switch data snapshots (default: `/app/data`)
+- `CACHE_DIR`: Directory for caching data (default: `/app/data/cache`)
+- `USE_CACHED_DATA`: Whether to use cached data instead of fetching live (default: `false`). Accepts: `true`, `false`, `yes`, `no`, `1`, `0`, `on`, `off`
+- `LOG_LEVEL`: Logging level (default: `INFO`). Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+- `TEST_SWITCH`: If set, validates only this specific switch instead of all switches
+
+#### Example env.production File
+
+Create an `env.production` file in your project directory:
+
+```bash
+# env.production
+FG_DEVICES_FILE=/app/fortigate_devices.json
+NETBOX_URL=https://netbox.example.com
+NETBOX_API_TOKEN=your_netbox_api_token_here
+SYNC_DATA_DIR=/app/data
+CACHE_DIR=/app/data/cache
+USE_CACHED_DATA=false
+NETBOX_TIMEOUT=120
+LOG_LEVEL=INFO
+
+# Optional: validate only a specific switch
+# TEST_SWITCH=AEX-ARN-UT2-SW01
+```
+
+**Note:** You can either:
+- Set `NETBOX_API_TOKEN` directly in the env file (as shown above)
+- Use `NETBOX_API_TOKEN_FILE` to point to a file containing the token (e.g., `NETBOX_API_TOKEN_FILE=/app/secrets/netbox_api_token`)
+
+The direct `NETBOX_API_TOKEN` variable takes priority if both are provided.
+
 ### Data storage
 
 - **Full sync run** (no `TEST_SWITCH`):
@@ -82,7 +129,7 @@ FG1_API_TOKEN_VALUE_HERE
 FG2_API_TOKEN_VALUE_HERE
 ```
 
-- `secrets/netbox_api_token`:
+- `secrets/netbox_api_token` (only needed if using `NETBOX_API_TOKEN_FILE`):
 
 ```text
 NETBOX_API_TOKEN_VALUE_HERE
@@ -90,7 +137,9 @@ NETBOX_API_TOKEN_VALUE_HERE
 
 All paths are mounted into the container as read-only and referenced via environment variables or via `fortigate_devices.json`.
 
-### Running via Docker with secrets and config
+### Running via Docker
+
+#### Build the Image
 
 Build the image from the repository root:
 
@@ -98,8 +147,22 @@ Build the image from the repository root:
 docker build -t fortigate-netbox:latest .
 ```
 
-Run a one-off validation (for example from cron) mounting the config, secrets, and data directory.
-In this example, we assume you run the command from the project root so `$(pwd)` points to the project folder:
+#### Run with env.production File
+
+The recommended approach is to use an `env.production` file with Docker's `--env-file` flag:
+
+```bash
+docker run --rm \
+  --env-file env.production \
+  -v "$(pwd)/fortigate_devices.json:/app/fortigate_devices.json:ro" \
+  -v "$(pwd)/secrets:/app/secrets:ro" \
+  -v "$(pwd)/cache:/app/data/cache" \
+  fortigate-netbox:latest
+```
+
+#### Run with Individual Environment Variables
+
+Alternatively, you can pass environment variables directly:
 
 ```bash
 docker run --rm \
@@ -114,17 +177,30 @@ docker run --rm \
   fortigate-netbox:latest
 ```
 
-Typical cron entry to run daily at 02:00 (note that `$PWD` should be replaced with the absolute path to the project folder):
+#### Scheduled Execution via Cron
+
+Typical cron entry to run daily at 02:00 using the `env.production` file:
+
+```cron
+0 2 * * * cd /home/user/fortigate-netbox && docker run --rm \
+  --env-file env.production \
+  -v "$(pwd)/fortigate_devices.json:/app/fortigate_devices.json:ro" \
+  -v "$(pwd)/secrets:/app/secrets:ro" \
+  -v "$(pwd)/cache:/app/data/cache" \
+  fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
+```
+
+Or with explicit environment variables:
 
 ```cron
 0 2 * * * docker run --rm \
-  -v /home/tre/git/fortigate-netbox/fortigate_devices.json:/app/fortigate_devices.json:ro \
-  -v /home/tre/git/fortigate-netbox/secrets:/app/secrets:ro \
+  -v /home/user/fortigate-netbox/fortigate_devices.json:/app/fortigate_devices.json:ro \
+  -v /home/user/fortigate-netbox/secrets:/app/secrets:ro \
   -v /var/lib/fortigate-netbox/data:/app/data \
   -e FG_DEVICES_FILE=/app/fortigate_devices.json \
   -e NETBOX_URL=https://netbox.example.com \
   -e NETBOX_API_TOKEN_FILE=/app/secrets/netbox_api_token \
   -e SYNC_DATA_DIR=/app/data \
   -e LOG_LEVEL=INFO \
-  fortigate-netbox:latest
+  fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
 ```

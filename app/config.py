@@ -54,6 +54,7 @@ class Settings:
     cache_dir: Path
     use_cached_data: bool
     log_level: str = "INFO"
+    test_switch: Optional[str] = None
 
 
 def _read_secret_file(path: Optional[str]) -> Optional[str]:
@@ -100,8 +101,12 @@ def load_settings() -> Settings:
         raise RuntimeError("NETBOX_URL not set.")
     netbox_url = _normalize_netbox_url(netbox_url)
 
-    nb_token_file = os.getenv("NETBOX_API_TOKEN_FILE", "secrets/netbox_api_token")
-    nb_token = _read_secret_file(nb_token_file) or os.getenv("NETBOX_API_TOKEN")
+    # Prioritize direct env var over file-based token
+    nb_token = os.getenv("NETBOX_API_TOKEN")
+    if not nb_token:
+        # Fall back to file-based token if direct env var not set
+        nb_token_file = os.getenv("NETBOX_API_TOKEN_FILE", "secrets/netbox_api_token")
+        nb_token = _read_secret_file(nb_token_file)
     if not nb_token:
         raise RuntimeError(
             "NetBox API token not configured. Set NETBOX_API_TOKEN or "
@@ -123,6 +128,8 @@ def load_settings() -> Settings:
     except ValueError as exc:
         raise RuntimeError("NETBOX_TIMEOUT must be an integer (seconds).") from exc
 
+    test_switch = os.getenv("TEST_SWITCH")
+
     return Settings(
         fortigate_devices=fortigate_devices,
         netbox_url=netbox_url,
@@ -132,4 +139,5 @@ def load_settings() -> Settings:
         cache_dir=cache_dir,
         use_cached_data=use_cached_data,
         log_level=log_level,
+        test_switch=test_switch,
     )
