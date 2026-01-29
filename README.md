@@ -56,7 +56,7 @@ netbox:
 
 fortigates:
   - name: "aex-arn"
-    host: "185.141.114.145"
+    host: "1.1.1.1"
     api_token: "YOUR_FORTIGATE_TOKEN"
     # Or use api_token_file: "secrets/fg1_api_token"
     verify_ssl: false
@@ -126,29 +126,6 @@ If `APP_CONFIG_FILE` is not set, the app uses the existing env+JSON behavior.
 - Use Unix line endings (LF), not Windows (CRLF)
 - Empty values are allowed (e.g., `TEST_SWITCH=`)
 
-Copy the provided `.env.example` to create your `env.production` file:
-
-```bash
-cp .env.example env.production
-```
-
-Then edit `env.production` with your actual values:
-
-```bash
-FG_DEVICES_FILE=/app/fortigate_devices.json
-NETBOX_URL=https://netbox.example.com
-NETBOX_API_TOKEN=your_actual_netbox_token_here
-SYNC_DATA_DIR=/app/data
-CACHE_DIR=/app/data/cache
-USE_CACHED_DATA=false
-NETBOX_TIMEOUT=120
-LOG_LEVEL=INFO
-TEST_SWITCH=AEX-ARN-UT2-SW01
-```
-
-**Note:** You can either:
-- Set `NETBOX_API_TOKEN` directly in the env file (as shown above)
-- Leave `NETBOX_API_TOKEN` empty and the app will use `NETBOX_API_TOKEN_FILE` to read from a file
 
 The direct `NETBOX_API_TOKEN` variable takes priority if both are provided.
 

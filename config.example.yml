@@ -4,14 +4,12 @@
 netbox:
   url: "https://netbox.example.com"
   api_token: "YOUR_NETBOX_TOKEN"
-  # Or use api_token_file: "secrets/netbox_api_token"
   timeout: 120
 
 fortigates:
   - name: "fg1"
     host: "fw1.example.com"
     api_token: "YOUR_FORTIGATE_TOKEN"
-    # Or use api_token_file: "secrets/fg1_api_token"
     verify_ssl: false
 
   # Add more FortiGate devices as needed:
@@ -23,9 +21,9 @@ fortigates:
 runtime:
   sync_data_dir: "/app/data"
   cache_dir: "/app/data/cache"
-  use_cached_data: false
+  use_cached_data: true
   log_level: "INFO"
-  test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")
+  test_switch: null  # Set to switch name for test mode (e.g. "TEST-SW01")
 
 # Optional: Map FortiGate VLAN names to NetBox VLAN names
 vlan_translations:
