@@ -7,8 +7,9 @@ class SwitchPort:
     """
     Normalized representation of a FortiGate-managed switch port.
 
-    For v1 we model VLANs by name, not VID, because the FortiGate
-    JSON uses VLAN object names (e.g. "quarantine", "vlan50").
+    VLANs are stored by name, not VID.
+    - native_vlan: untagged/native VLAN
+    - allowed_vlans: tagged VLANs only (or ["*"] for tagged-all/allowed-vlans-all)
     """
 
     name: str
@@ -22,4 +23,3 @@ class Switch:
 
     name: str
     ports: Dict[str, SwitchPort]  # key = port name
-

@@ -35,6 +35,16 @@ def _normalize_vlan_name(name: Optional[str]) -> Optional[str]:
     return s
 
 
+def _extract_netbox_mode(iface: dict) -> Optional[str]:
+    """Extract NetBox interface mode value."""
+    mode = iface.get("mode")
+    if isinstance(mode, dict):
+        mode = mode.get("value")
+    if isinstance(mode, str) and mode:
+        return mode.strip().lower()
+    return None
+
+
 def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, object]]:
     """Convert NetBox interface JSON into a normalized mapping.
 
@@ -43,7 +53,8 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
           "port_name_lower": {
             "name": "Port1",
             "native_vlan": "VLAN-31" or None,
-            "allowed_vlans": ["VLAN-31", "VLAN-50", ...]
+            "tagged_vlans": ["VLAN-50", ...] or ["*"] for tagged-all,
+            "mode": "access" | "tagged" | "tagged-all" | "unknown"
           },
           ...
         }
@@ -51,6 +62,9 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
     Notes:
       - Port names are matched case-insensitively.
       - VLAN names are normalized so FortiGate-style "vlan31" matches NetBox-style "VLAN-31".
+      - mode=access: tagged_vlans=[]
+      - mode=tagged: tagged_vlans=explicit list from tagged_vlans field
+      - mode=tagged-all: tagged_vlans=["*"]
     """
     mapping: Dict[str, Dict[str, object]] = {}
 
@@ -71,27 +85,37 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
 
         untagged = iface.get("untagged_vlan")
         tagged = iface.get("tagged_vlans") or []
+        mode = _extract_netbox_mode(iface)
 
         native_name: Optional[str] = None
         if isinstance(untagged, dict):
             native_name = _normalize_vlan_name(untagged.get("name") or untagged.get("display"))
 
-        allowed_set = set()
-        for vlan in tagged:
-            if not isinstance(vlan, dict):
+        tagged_set = set()
+        for v in tagged:
+            if not isinstance(v, dict):
                 continue
-            vlan_name = _normalize_vlan_name(vlan.get("name") or vlan.get("display"))
-            if vlan_name:
-                allowed_set.add(vlan_name)
+            vn = _normalize_vlan_name(v.get("name") or v.get("display"))
+            if vn:
+                tagged_set.add(vn)
 
-        if not allowed_set and native_name:
-            # Access port: allow only native VLAN
-            allowed_set.add(native_name)
+        # NetBox semantics by mode:
+        # - access: only untagged_vlan, tagged_vlans ignored/empty
+        # - tagged: untagged_vlan (native) + tagged_vlans (explicit tagged VLANs)
+        # - tagged-all: untagged_vlan (native), tagged_vlans empty => treat as "*" (all tagged)
+        if mode == "tagged-all":
+            tagged_list = ["*"]
+        elif mode == "access":
+            tagged_list = []
+        else:
+            # tagged (or unknown): use explicit tagged_vlans list
+            tagged_list = sorted(tagged_set)
 
         mapping[key] = {
             "name": raw_name,
             "native_vlan": native_name,
-            "allowed_vlans": sorted(allowed_set),
+            "tagged_vlans": tagged_list,
+            "mode": mode or "unknown",
         }
 
     return mapping
@@ -113,42 +137,58 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> None
             continue
 
         nb_native = nb_port["native_vlan"]
-        nb_allowed = nb_port["allowed_vlans"]
+        nb_tagged = nb_port["tagged_vlans"]
+        nb_mode = nb_port.get("mode")
 
-        fg_allowed = list(fg_port.allowed_vlans)
-        if "*" in fg_allowed:
-            logger.warning(
-                "Port %s on switch %s has 'allowed-vlans-all' enabled on FortiGate; "
-                "skipping precise VLAN comparison.",
-                port_name,
-                switch.name,
-            )
+        fg_tagged_raw = list(fg_port.allowed_vlans)  # now treated as tagged VLANs
+        fg_native = _normalize_vlan_name(fg_port.native_vlan)
+        fg_tagged = sorted({v for v in (_normalize_vlan_name(v) for v in fg_tagged_raw) if v})
+
+        # Tagged-all handling: if either side says "*" treat it as tagged-all and only compare native VLAN
+        fg_is_all = "*" in fg_tagged_raw
+        nb_is_all = isinstance(nb_tagged, list) and "*" in nb_tagged
+        if fg_is_all or nb_is_all:
+            if fg_native != nb_native:
+                logger.error(
+                    "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native=%s tagged=ALL, NB native=%s tagged=ALL",
+                    switch.name,
+                    port_name,
+                    nb_port.get("name"),
+                    nb_mode,
+                    fg_native,
+                    nb_native,
+                )
+            else:
+                logger.info(
+                    "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native=%s, tagged=ALL)",
+                    switch.name,
+                    port_name,
+                    nb_port.get("name"),
+                    nb_mode,
+                    fg_native,
+                )
             continue
 
-        fg_native = _normalize_vlan_name(fg_port.native_vlan)
-
-        fg_allowed_norm = sorted(
-            {v for v in (_normalize_vlan_name(v) for v in fg_allowed) if v is not None}
-        )
-
-        if fg_native != nb_native or fg_allowed_norm != nb_allowed:
+        if fg_native != nb_native or fg_tagged != nb_tagged:
             logger.error(
-                "VLAN mismatch for %s/%s (NetBox iface=%s): FG native=%s allowed=%s, "
-                "NB native=%s allowed=%s",
+                "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native=%s tagged=%s, "
+                "NB native=%s tagged=%s",
                 switch.name,
                 port_name,
                 nb_port.get("name"),
+                nb_mode,
                 fg_native,
-                fg_allowed_norm,
+                fg_tagged,
                 nb_native,
-                nb_allowed,
+                nb_tagged,
             )
         else:
             logger.info(
-                "VLANs match for %s/%s (NetBox iface=%s, native=%s, allowed=%s)",
+                "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native=%s, tagged=%s)",
                 switch.name,
                 port_name,
                 nb_port.get("name"),
+                nb_mode,
                 fg_native,
-                fg_allowed_norm,
+                fg_tagged,
             )

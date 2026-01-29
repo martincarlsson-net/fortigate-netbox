@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -82,36 +83,46 @@ class FortiGateClient:
         return data.get("results", [])
 
     @staticmethod
+    def _normalize_vlan_name(name: Optional[str]) -> Optional[str]:
+        """Normalize VLAN names: vlan31 -> VLAN-31."""
+        if not name:
+            return None
+        s = str(name).strip()
+        m = re.match(r"^vlan[- ]?(\d+)$", s, flags=re.IGNORECASE)
+        if m:
+            return f"VLAN-{int(m.group(1))}"
+        return s
+
+    @staticmethod
     def _normalize_port_vlans(port: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract native/allowed VLAN names from a FortiGate port dict."""
+        """Extract native + tagged VLAN names from a FortiGate port dict.
 
-        # Get native VLAN from the 'vlan' field (NOT from untagged-vlans)
-        native_vlan: Optional[str] = None
-        native_vlan_name = port.get("vlan")
-        if isinstance(native_vlan_name, str) and native_vlan_name:
-            # Convert vlan90 -> VLAN-90 format
-            if native_vlan_name.startswith("vlan") and native_vlan_name[4:].isdigit():
-                vlan_id = native_vlan_name[4:]
-                native_vlan = f"VLAN-{vlan_id}"
-            else:
-                native_vlan = native_vlan_name
+        Mapping:
+          - native_vlan: from 'vlan' field
+          - allowed_vlans: tagged VLANs from 'allowed-vlans' (excluding native_vlan)
+          - allowed-vlans-all=enable => allowed_vlans=["*"] (tagged-all)
+        """
 
-        allowed_vlans: List[str] = []
+        # Native VLAN from 'vlan' field
+        native_vlan = FortiGateClient._normalize_vlan_name(port.get("vlan"))
+
+        # Tagged-all: allowed-vlans-all=enable
+        if str(port.get("allowed-vlans-all", "")).strip().lower() == "enable":
+            return {"native_vlan": native_vlan, "allowed_vlans": ["*"]}
+
+        # Tagged VLANs: allowed-vlans (excluding native)
+        tagged_vlans: List[str] = []
         for vlan_obj in port.get("allowed-vlans", []) or []:
             if not isinstance(vlan_obj, dict):
                 continue
             vlan_name = vlan_obj.get("vlan-name")
             if not isinstance(vlan_name, str) or not vlan_name:
                 continue
+            norm = FortiGateClient._normalize_vlan_name(vlan_name)
+            if norm and norm != native_vlan:
+                tagged_vlans.append(norm)
 
-            # Convert vlan90 -> VLAN-90 format
-            if vlan_name.startswith("vlan") and vlan_name[4:].isdigit():
-                vlan_id = vlan_name[4:]
-                allowed_vlans.append(f"VLAN-{vlan_id}")
-            else:
-                allowed_vlans.append(vlan_name)
-
-        return {"native_vlan": native_vlan, "allowed_vlans": allowed_vlans}
+        return {"native_vlan": native_vlan, "allowed_vlans": tagged_vlans}
 
     def get_switches(self) -> List[Switch]:
         """Convert FortiGate response into internal Switch objects."""
