@@ -61,7 +61,7 @@ class FortiGateClient:
 
         self.logger.info("Fetching FortiSwitch raw data from %s API", self.host)
         resp = self.session.get(
-            f"{self.base_url}/api/v2/monitor/switch-controller/managed-switch/select",
+            f"{self.base_url}/api/v2/monitor/switch-controller/managed-switch/",
             verify=self.verify_ssl,
             timeout=30,
         )
