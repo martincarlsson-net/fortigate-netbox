@@ -55,30 +55,50 @@ The application is configured via environment variables, typically loaded from a
 - `LOG_LEVEL`: Logging level (default: `INFO`). Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 - `TEST_SWITCH`: If set, validates only this specific switch instead of all switches
 
-#### Example env.production File
+#### Creating Your Environment File
 
-Create an `env.production` file in your project directory:
+**IMPORTANT:** Docker's `--env-file` has strict format requirements:
+- **NO comments** (lines starting with `#`) are allowed in the file
+- Each line must be in the format: `KEY=VALUE`
+- No spaces around the `=` sign
+- Use Unix line endings (LF), not Windows (CRLF)
+- Empty values are allowed (e.g., `TEST_SWITCH=`)
+
+Copy the provided `.env.example` to create your `env.production` file:
 
 ```bash
-# env.production
+cp .env.example env.production
+```
+
+Then edit `env.production` with your actual values:
+
+```bash
 FG_DEVICES_FILE=/app/fortigate_devices.json
 NETBOX_URL=https://netbox.example.com
-NETBOX_API_TOKEN=your_netbox_api_token_here
+NETBOX_API_TOKEN=your_actual_netbox_token_here
 SYNC_DATA_DIR=/app/data
 CACHE_DIR=/app/data/cache
 USE_CACHED_DATA=false
 NETBOX_TIMEOUT=120
 LOG_LEVEL=INFO
-
-# Optional: validate only a specific switch
-# TEST_SWITCH=AEX-ARN-UT2-SW01
+TEST_SWITCH=AEX-ARN-UT2-SW01
 ```
 
 **Note:** You can either:
 - Set `NETBOX_API_TOKEN` directly in the env file (as shown above)
-- Use `NETBOX_API_TOKEN_FILE` to point to a file containing the token (e.g., `NETBOX_API_TOKEN_FILE=/app/secrets/netbox_api_token`)
+- Leave `NETBOX_API_TOKEN` empty and the app will use `NETBOX_API_TOKEN_FILE` to read from a file
 
 The direct `NETBOX_API_TOKEN` variable takes priority if both are provided.
+
+#### Troubleshooting Environment Variables
+
+If you see `DEBUG: VARIABLE_NAME=<not set>` in the output:
+
+1. **Check for comments**: Remove all lines starting with `#` from your env file
+2. **Check file format**: Ensure no spaces around `=` signs
+3. **Check line endings**: Convert to Unix format with `dos2unix env.production` if needed
+4. **Check file location**: The env file must be in your current directory or use absolute path
+5. **Test the file manually**: Run `docker run --rm --env-file env.production alpine env` to see if Docker loads it
 
 ### Data storage
 
@@ -162,7 +182,7 @@ docker run --rm \
 
 #### Run with Individual Environment Variables
 
-Alternatively, you can pass environment variables directly:
+Alternatively, you can pass environment variables directly (useful for testing):
 
 ```bash
 docker run --rm \
@@ -171,8 +191,9 @@ docker run --rm \
   -v /var/lib/fortigate-netbox/data:/app/data \
   -e FG_DEVICES_FILE=/app/fortigate_devices.json \
   -e NETBOX_URL=https://netbox.example.com \
-  -e NETBOX_API_TOKEN_FILE=/app/secrets/netbox_api_token \
+  -e NETBOX_API_TOKEN=your_token_here \
   -e SYNC_DATA_DIR=/app/data \
+  -e CACHE_DIR=/app/data/cache \
   -e LOG_LEVEL=INFO \
   fortigate-netbox:latest
 ```
@@ -199,7 +220,7 @@ Or with explicit environment variables:
   -v /var/lib/fortigate-netbox/data:/app/data \
   -e FG_DEVICES_FILE=/app/fortigate_devices.json \
   -e NETBOX_URL=https://netbox.example.com \
-  -e NETBOX_API_TOKEN_FILE=/app/secrets/netbox_api_token \
+  -e NETBOX_API_TOKEN=your_token_here \
   -e SYNC_DATA_DIR=/app/data \
   -e LOG_LEVEL=INFO \
   fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
