@@ -70,6 +70,32 @@ def _read_secret_file(path: Optional[str]) -> Optional[str]:
 def load_settings() -> Settings:
     """Load settings from environment variables and JSON device file."""
 
+    # Debug: Print environment variables to help troubleshoot
+    print("DEBUG: Checking environment variables...")
+    env_vars_to_check = [
+        "FG_DEVICES_FILE",
+        "NETBOX_URL",
+        "NETBOX_API_TOKEN",
+        "NETBOX_API_TOKEN_FILE",
+        "SYNC_DATA_DIR",
+        "CACHE_DIR",
+        "USE_CACHED_DATA",
+        "NETBOX_TIMEOUT",
+        "LOG_LEVEL",
+        "TEST_SWITCH",
+    ]
+    for var in env_vars_to_check:
+        value = os.getenv(var)
+        if value:
+            # Mask sensitive values
+            if "TOKEN" in var:
+                display_value = f"{value[:10]}..." if len(value) > 10 else "***"
+            else:
+                display_value = value
+            print(f"DEBUG: {var}={display_value}")
+        else:
+            print(f"DEBUG: {var}=<not set>")
+
     devices_file = os.getenv("FG_DEVICES_FILE", "fortigate_devices.json")
     try:
         with open(devices_file, "r", encoding="utf-8") as f:
@@ -98,7 +124,10 @@ def load_settings() -> Settings:
 
     netbox_url = os.getenv("NETBOX_URL")
     if not netbox_url:
-        raise RuntimeError("NETBOX_URL not set.")
+        raise RuntimeError(
+            "NETBOX_URL not set. Please check your env.production file or environment variables. "
+            "Ensure the file has no leading/trailing spaces and uses the format: NETBOX_URL=https://netbox.example.com"
+        )
     netbox_url = _normalize_netbox_url(netbox_url)
 
     # Prioritize direct env var over file-based token
