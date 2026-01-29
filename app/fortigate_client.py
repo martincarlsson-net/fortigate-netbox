@@ -146,12 +146,6 @@ class FortiGateClient:
                 if not port_name:
                     continue
 
-                # Keep existing debug behavior: show full dict for first port of each switch.
-                if idx == 0:
-                    self.logger.info(
-                        "First port full dictionary: %s", json.dumps(p, indent=2)
-                    )
-
                 vlan_info = self._normalize_port_vlans(p)
                 port_model = SwitchPort(
                     name=port_name,
