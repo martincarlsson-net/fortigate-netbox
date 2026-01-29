@@ -22,10 +22,12 @@ class FortiGateClient:
         password: Optional[str] = None,
         verify_ssl: bool = True,
         cache_manager: Optional[CacheManager] = None,
+        vlan_translations: Optional[Dict[str, str]] = None,
     ):
         self.host = host
         self.verify_ssl = verify_ssl
         self.cache_manager = cache_manager
+        self.vlan_translations: Dict[str, str] = vlan_translations or {}
         self.base_url = f"https://{host}".rstrip("/")
 
         self.session = requests.Session()
@@ -93,8 +95,26 @@ class FortiGateClient:
             return f"VLAN-{int(m.group(1))}"
         return s
 
-    @staticmethod
-    def _normalize_port_vlans(port: Dict[str, Any]) -> Dict[str, Any]:
+    def _translate_vlan(self, name: Optional[str]) -> Optional[str]:
+        """Translate FortiGate VLAN names to NetBox VLAN names.
+
+        Translation is applied in two passes:
+        1. Check raw FortiGate name (e.g. "_default" -> "VLAN-1")
+        2. Normalize then check again (e.g. "vlan90" -> "VLAN-90" -> translation if mapped)
+        """
+        if not name:
+            return None
+        raw = str(name).strip()
+        # Allow mapping in terms of raw FortiGate name (e.g. "_default")
+        if raw in self.vlan_translations:
+            return self.vlan_translations[raw]
+        norm = self._normalize_vlan_name(raw)
+        if not norm:
+            return None
+        # Also allow mapping after normalization (e.g. "VLAN-90" -> "SomeName")
+        return self.vlan_translations.get(norm, norm)
+
+    def _normalize_port_vlans(self, port: Dict[str, Any]) -> Dict[str, Any]:
         """Extract native + tagged VLAN names from a FortiGate port dict.
 
         Mapping:
@@ -104,7 +124,7 @@ class FortiGateClient:
         """
 
         # Native VLAN from 'vlan' field
-        native_vlan = FortiGateClient._normalize_vlan_name(port.get("vlan"))
+        native_vlan = self._translate_vlan(port.get("vlan"))
 
         # Tagged-all: allowed-vlans-all=enable
         if str(port.get("allowed-vlans-all", "")).strip().lower() == "enable":
@@ -118,7 +138,7 @@ class FortiGateClient:
             vlan_name = vlan_obj.get("vlan-name")
             if not isinstance(vlan_name, str) or not vlan_name:
                 continue
-            norm = FortiGateClient._normalize_vlan_name(vlan_name)
+            norm = self._translate_vlan(vlan_name)
             if norm and norm != native_vlan:
                 tagged_vlans.append(norm)
 

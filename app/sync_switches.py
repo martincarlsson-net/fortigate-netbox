@@ -52,6 +52,7 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
             host=fg.host,
             api_token=fg.api_token,
             verify_ssl=fg.verify_ssl,
+            vlan_translations=settings.vlan_translations,
         )
 
         try:
