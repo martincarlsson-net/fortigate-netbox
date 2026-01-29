@@ -1,5 +1,6 @@
 import logging
 import sys
+from pathlib import Path
 from typing import List, Optional
 
 from .config import Settings
@@ -29,7 +30,19 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
       against the live FortiGate + NetBox APIs.
     """
 
-    nb_client = NetBoxClient(settings.netbox_url, settings.netbox_api_token)
+    # Initialize cache manager
+    cache_manager = CacheManager(
+        cache_dir=Path(settings.cache_dir),
+        use_cache=settings.use_cached_data,
+    )
+
+    # Initialize NetBox client with timeout and cache manager
+    nb_client = NetBoxClient(
+        base_url=settings.netbox_url,
+        token=settings.netbox_api_token,
+        timeout=settings.netbox_timeout,
+        cache_manager=cache_manager,
+    )
 
     matched_any = False
 

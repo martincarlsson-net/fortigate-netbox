@@ -13,7 +13,8 @@ class NetBoxClient:
     def __init__(
         self, 
         base_url: str, 
-        token: str, 
+        token: str,
+        timeout: int = 120,
         verify_ssl: bool = True, 
         cache_manager: Optional[CacheManager] = None
     ):
@@ -88,7 +89,7 @@ class NetBoxClient:
         url = f"{self.base_url}/api/dcim/devices/"
         
         while url:
-            response = self.session.get(url, verify=self.verify_ssl, timeout=30)
+            response = self.session.get(url, verify=self.verify_ssl, timeout=self.default_timeout)
             response.raise_for_status()
             data = response.json()
             devices.extend(data.get("results", []))
@@ -118,44 +119,44 @@ class NetBoxClient:
             )
         return results[0]
 
-def get_interfaces_for_device(self, device_id: int) -> list[dict]:
-    """Get all interfaces for a specific device with caching support."""
-    cache_key = f"netbox_device_{device_id}_interfaces"
-    
-    # Try cache first (only if use_cache=True)
-    if self.cache_manager:
-        cached_data = self.cache_manager.get(cache_key)
-        if cached_data is not None:
-            self.logger.info(f"✅ Using cached interfaces for device {device_id}")
-            return cached_data
-    
-    # Cache miss or use_cache=False: fetch from API
-    self.logger.info(f"🔄 Fetching interfaces from NetBox API for device {device_id}...")
-    interfaces = []
-    offset = 0
-    limit = 100
-    
-    while True:
-        params = {
-            "device_id": device_id,
-            "limit": limit,
-            "offset": offset,
-        }
+    def get_interfaces_for_device(self, device_id: int) -> list[dict]:
+        """Get all interfaces for a specific device with caching support."""
+        cache_key = f"netbox_device_{device_id}_interfaces"
         
-        self.logger.debug(f"  Fetching batch: offset={offset}, limit={limit}")
-        data = self._get("/api/dcim/interfaces/", params=params)
+        # Try cache first (only if use_cache=True)
+        if self.cache_manager:
+            cached_data = self.cache_manager.get(cache_key)
+            if cached_data is not None:
+                self.logger.info(f"✅ Using cached interfaces for device {device_id}")
+                return cached_data
         
-        results = data.get("results", [])
-        interfaces.extend(results)
+        # Cache miss or use_cache=False: fetch from API
+        self.logger.info(f"🔄 Fetching interfaces from NetBox API for device {device_id}...")
+        interfaces = []
+        offset = 0
+        limit = 100
         
-        if not data.get("next"):
-            break
+        while True:
+            params = {
+                "device_id": device_id,
+                "limit": limit,
+                "offset": offset,
+            }
+            
+            self.logger.debug(f"  Fetching batch: offset={offset}, limit={limit}")
+            data = self._get("/api/dcim/interfaces/", params=params)
+            
+            results = data.get("results", [])
+            interfaces.extend(results)
+            
+            if not data.get("next"):
+                break
+            
+            offset += limit
         
-        offset += limit
-    
-    # ALWAYS cache the result (even if use_cache=False)
-    if self.cache_manager:
-        self.cache_manager.set(cache_key, interfaces)
-    
-    self.logger.info(f"✅ Fetched {len(interfaces)} interfaces for device {device_id}")
-    return interfaces
+        # ALWAYS cache the result (even if use_cache=False)
+        if self.cache_manager:
+            self.cache_manager.set(cache_key, interfaces)
+        
+        self.logger.info(f"✅ Fetched {len(interfaces)} interfaces for device {device_id}")
+        return interfaces
