@@ -4,7 +4,7 @@ Python application to validate and (in future versions) synchronize switch port 
 
 ### Modules overview
 
-- **`app/config.py`**: Loads configuration from environment variables and a FortiGate devices JSON file. Resolves API tokens from files or env vars and prepares a `Settings` object (FortiGate inventory, NetBox URL/token, data directory, log level).
+- **`app/config.py`**: Loads configuration from a YAML file (recommended) or environment variables and a FortiGate devices JSON file (legacy). Resolves API tokens from files or direct values and prepares a `Settings` object (FortiGate inventory, NetBox URL/token, VLAN translations, data directory, log level).
 - **`app/logging_config.py`**: Central logging setup. Configures a simple console logger with timestamp, level, and logger name, honoring the `LOG_LEVEL` setting.
 - **`app/models.py`**: Defines normalized data models:
   - `Switch`: a managed switch.
@@ -12,6 +12,7 @@ Python application to validate and (in future versions) synchronize switch port 
 - **`app/fortigate_client.py`**: FortiGate HTTPS client that:
   - Calls `/api/v2/cmdb/switch-controller/managed-switch/`.
   - Parses the real FortiGate JSON (e.g. `switch-id`, `ports[].port-name`, `untagged-vlans`, `allowed-vlans`, `allowed-vlans-all`).
+  - Applies VLAN name translations (e.g. `_default` → `VLAN-1`).
   - Normalizes switches into `Switch`/`SwitchPort` models.
 - **`app/netbox_client.py`**: Read-only NetBox client that:
   - Looks up devices by name.
@@ -35,9 +36,70 @@ Python application to validate and (in future versions) synchronize switch port 
 
 ### Configuration
 
-#### Environment Variables
+The app supports two configuration modes:
 
-The application is configured via environment variables, typically loaded from an `env.production` file using Docker's `--env-file` flag.
+1. **YAML single-file** (recommended): All settings in one YAML file
+2. **Legacy mode**: Environment variables + JSON devices file
+
+#### Recommended: YAML Single-File Configuration
+
+Put all configuration (NetBox, FortiGates, runtime options, VLAN translations) into one YAML file.
+
+**Example `config.yml`:**
+
+```yaml
+netbox:
+  url: "https://netbox.example.com"
+  api_token: "YOUR_NETBOX_TOKEN"
+  # Or use api_token_file: "secrets/netbox_api_token"
+  timeout: 120
+
+fortigates:
+  - name: "aex-arn"
+    host: "185.141.114.145"
+    api_token: "YOUR_FORTIGATE_TOKEN"
+    # Or use api_token_file: "secrets/fg1_api_token"
+    verify_ssl: false
+
+  # Add more FortiGate devices as needed:
+  # - name: "fg2"
+  #   host: "10.0.0.2"
+  #   api_token: "ANOTHER_TOKEN"
+  #   verify_ssl: true
+
+runtime:
+  sync_data_dir: "/app/data"
+  cache_dir: "/app/data/cache"
+  use_cached_data: true
+  log_level: "INFO"
+  test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")
+
+# Optional: Map FortiGate VLAN names to NetBox VLAN names
+vlan_translations:
+  _default: "VLAN-1"
+  # quarantine: "VLAN-90"
+```
+
+See `config.example.yml` for a full template.
+
+**Running with YAML config:**
+
+```bash
+docker run --rm \
+  -e APP_CONFIG_FILE=/app/config.yml \
+  -v "$(pwd)/config.yml:/app/config.yml:ro" \
+  -v "$(pwd)/cache:/app/data/cache" \
+  fortigate-netbox:latest
+```
+
+**Key benefits:**
+- Single file to manage (no `secrets/`, `fortigate_devices.json`, or multi-line `env.production`)
+- Human-friendly with comments and structure
+- Easy to version control (just add `config.yml` to `.gitignore` if it contains secrets)
+
+#### Legacy Mode: Environment Variables + JSON
+
+If `APP_CONFIG_FILE` is not set, the app uses the existing env+JSON behavior.
 
 **Required Variables:**
 
@@ -55,7 +117,7 @@ The application is configured via environment variables, typically loaded from a
 - `LOG_LEVEL`: Logging level (default: `INFO`). Options: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 - `TEST_SWITCH`: If set, validates only this specific switch instead of all switches
 
-#### Creating Your Environment File
+**Creating Your Environment File (Legacy)**
 
 **IMPORTANT:** Docker's `--env-file` has strict format requirements:
 - **NO comments** (lines starting with `#`) are allowed in the file
@@ -90,7 +152,7 @@ TEST_SWITCH=AEX-ARN-UT2-SW01
 
 The direct `NETBOX_API_TOKEN` variable takes priority if both are provided.
 
-#### Troubleshooting Environment Variables
+**Troubleshooting Environment Variables**
 
 If you see `DEBUG: VARIABLE_NAME=<not set>` in the output:
 
@@ -99,6 +161,23 @@ If you see `DEBUG: VARIABLE_NAME=<not set>` in the output:
 3. **Check line endings**: Convert to Unix format with `dos2unix env.production` if needed
 4. **Check file location**: The env file must be in your current directory or use absolute path
 5. **Test the file manually**: Run `docker run --rm --env-file env.production alpine env` to see if Docker loads it
+
+### VLAN Translations
+
+You can define custom mappings for FortiGate VLAN names that don't follow the standard `vlanXX` → `VLAN-XX` pattern.
+
+**YAML config:**
+
+```yaml
+vlan_translations:
+  _default: "VLAN-1"
+  quarantine: "VLAN-90"
+```
+
+**How it works:**
+- FortiGate names are checked first (e.g. `_default` matches before normalization)
+- Then normalized names are checked (e.g. `vlan90` → `VLAN-90` → translation if mapped)
+- Translations are applied during FortiGate data parsing, before comparison with NetBox
 
 ### Data storage
 
@@ -112,7 +191,7 @@ If you see `DEBUG: VARIABLE_NAME=<not set>` in the output:
   - Directory: `SYNC_DATA_DIR` (default: `/app/data`). In Docker you typically mount a host path, e.g. `-v /var/lib/fortigate-netbox/data:/app/data`.
   - Files: `<fortigate_name>_switches.json` (e.g. `fg1_switches.json`) inside that directory. These are created only during full sync runs.
 
-### Example FortiGate devices config
+### Example FortiGate devices config (Legacy JSON)
 
 Create a JSON file in this project folder (for example `fortigate_devices.json`, which is already in `.gitignore`) describing each FortiGate and its own token file:
 
@@ -133,7 +212,7 @@ Create a JSON file in this project folder (for example `fortigate_devices.json`,
 ]
 ```
 
-### Example secret/token files
+### Example secret/token files (Legacy)
 
 These files contain **only** the token value (no quotes, no JSON), and should live in the project folder but are excluded from Git by `.gitignore`:
 
@@ -167,9 +246,19 @@ Build the image from the repository root:
 docker build -t fortigate-netbox:latest .
 ```
 
-#### Run with env.production File
+#### Run with YAML Config (Recommended)
 
-The recommended approach is to use an `env.production` file with Docker's `--env-file` flag:
+```bash
+docker run --rm \
+  -e APP_CONFIG_FILE=/app/config.yml \
+  -v "$(pwd)/config.yml:/app/config.yml:ro" \
+  -v "$(pwd)/cache:/app/data/cache" \
+  fortigate-netbox:latest
+```
+
+#### Run with env.production File (Legacy)
+
+The legacy approach uses an `env.production` file with Docker's `--env-file` flag:
 
 ```bash
 docker run --rm \
@@ -180,7 +269,7 @@ docker run --rm \
   fortigate-netbox:latest
 ```
 
-#### Run with Individual Environment Variables
+#### Run with Individual Environment Variables (Legacy)
 
 Alternatively, you can pass environment variables directly (useful for testing):
 
@@ -200,7 +289,17 @@ docker run --rm \
 
 #### Scheduled Execution via Cron
 
-Typical cron entry to run daily at 02:00 using the `env.production` file:
+Typical cron entry to run daily at 02:00 using YAML config:
+
+```cron
+0 2 * * * cd /home/user/fortigate-netbox && docker run --rm \
+  -e APP_CONFIG_FILE=/app/config.yml \
+  -v "$(pwd)/config.yml:/app/config.yml:ro" \
+  -v "$(pwd)/cache:/app/data/cache" \
+  fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
+```
+
+Or with the legacy `env.production` file:
 
 ```cron
 0 2 * * * cd /home/user/fortigate-netbox && docker run --rm \
