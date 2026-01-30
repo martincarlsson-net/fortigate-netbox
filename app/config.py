@@ -197,32 +197,6 @@ def _load_settings_from_yaml(path: str) -> Settings:
 def load_settings() -> Settings:
     """Load settings from environment variables and JSON device file (legacy) or YAML (new)."""
 
-    # Debug: Print environment variables to help troubleshoot
-    print("DEBUG: Checking environment variables...")
-    env_vars_to_check = [
-        "APP_CONFIG_FILE",
-        "FG_DEVICES_FILE",
-        "NETBOX_URL",
-        "NETBOX_API_TOKEN",
-        "NETBOX_API_TOKEN_FILE",
-        "SYNC_DATA_DIR",
-        "CACHE_DIR",
-        "USE_CACHED_DATA",
-        "NETBOX_TIMEOUT",
-        "LOG_LEVEL",
-        "TEST_SWITCH",
-    ]
-    for var in env_vars_to_check:
-        value = os.getenv(var)
-        if value:
-            # Mask sensitive values
-            if "TOKEN" in var:
-                display_value = f"{value[:10]}..." if len(value) > 10 else "***"
-            else:
-                display_value = value
-            print(f"DEBUG: {var}={display_value}")
-        else:
-            print(f"DEBUG: {var}=<not set>")
 
     # YAML-first mode (single source of truth)
     app_config_file = os.getenv("APP_CONFIG_FILE")
