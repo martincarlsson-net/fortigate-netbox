@@ -1,15 +1,14 @@
 import logging
 from typing import Any, Dict, List, Optional
 import requests
-from typing import Optional
-from .cache_manager import CacheManager  
+from .cache_manager import CacheManager
 import time
 from requests.exceptions import ReadTimeout, ConnectionError
 logger = logging.getLogger(__name__)
 
 
 class NetBoxClient:
-    """Thin wrapper around the NetBox REST API for read-only operations."""
+    """Thin wrapper around the NetBox REST API (read + limited write operations)."""
     def __init__(
         self, 
         base_url: str, 
@@ -70,6 +69,18 @@ class NetBoxClient:
                     time.sleep(wait_time)
                 else:
                     raise
+
+    def _patch(self, endpoint: str, payload: dict, *, timeout: Optional[int] = None) -> dict:
+        """PATCH to NetBox API and return JSON response."""
+        url = f"{self.base_url}{endpoint}"
+        resp = self.session.patch(
+            url,
+            json=payload,
+            verify=self.verify_ssl,
+            timeout=timeout or self.default_timeout,
+        )
+        resp.raise_for_status()
+        return resp.json()
     
 
     def get_all_devices(self) -> list[dict]:
@@ -160,3 +171,77 @@ class NetBoxClient:
         
         self.logger.info(f"✅ Fetched {len(interfaces)} interfaces for device {device_id}")
         return interfaces
+
+    def get_vlan_id_by_name(self, vlan_name: str) -> int:
+        """Resolve a VLAN name (e.g. 'VLAN-90') to a NetBox VLAN ID."""
+        name = vlan_name.strip()
+        if not name:
+            raise RuntimeError("VLAN name is empty")
+
+        cache_key = f"netbox_vlan_id_{name}"
+        if self.cache_manager:
+            cached = self.cache_manager.get(cache_key)
+            if isinstance(cached, int):
+                return cached
+
+        data = self._get("/api/ipam/vlans/", params={"name": name})
+        results = data.get("results", [])
+        if not results:
+            raise RuntimeError(f"NetBox VLAN not found by name: {name}")
+        if len(results) > 1:
+            raise RuntimeError(f"Multiple NetBox VLANs found with name '{name}'; please make VLAN names unique.")
+
+        vlan_id = results[0].get("id")
+        if not isinstance(vlan_id, int):
+            raise RuntimeError(f"NetBox returned VLAN without integer id for name '{name}'")
+
+        if self.cache_manager:
+            self.cache_manager.set(cache_key, vlan_id)
+
+        return vlan_id
+
+    def update_interface_vlan_config(
+        self,
+        *,
+        interface_id: int,
+        mode: str,
+        native_vlan_name: Optional[str],
+        tagged_vlan_names: List[str],
+    ) -> dict:
+        """
+        Update a NetBox interface VLAN config so it matches FortiGate.
+
+        - mode: 'access' or 'tagged'
+        - native VLAN sets untagged_vlan
+        - tagged VLANs set tagged_vlans (list of VLAN IDs); cleared in access mode
+        """
+        if not isinstance(interface_id, int):
+            raise RuntimeError("interface_id must be an integer")
+
+        mode_value = (mode or "").strip().lower()
+        if mode_value not in {"access", "tagged"}:
+            raise RuntimeError(f"Unsupported NetBox interface mode for update: {mode!r}")
+
+        untagged_vlan_id = None
+        if native_vlan_name:
+            untagged_vlan_id = self.get_vlan_id_by_name(native_vlan_name)
+
+        tagged_vlan_ids: List[int] = []
+        for vn in tagged_vlan_names:
+            tagged_vlan_ids.append(self.get_vlan_id_by_name(vn))
+
+        payload = {
+            "mode": mode_value,
+            "untagged_vlan": untagged_vlan_id,
+            "tagged_vlans": tagged_vlan_ids if mode_value == "tagged" else [],
+        }
+
+        self.logger.warning(
+            "Updating NetBox interface %s VLANs: mode=%s untagged=%s tagged=%s",
+            interface_id,
+            mode_value,
+            native_vlan_name,
+            tagged_vlan_names,
+        )
+
+        return self._patch(f"/api/dcim/interfaces/{interface_id}/", payload)
