@@ -86,6 +86,26 @@ class CacheManager:
         except Exception as e:
             self.logger.error(f"❌ Error writing cache file {cache_key}: {e}")
     
+    def delete(self, cache_key: str) -> bool:
+        """
+        Delete a single cache entry (best-effort).
+
+        Returns:
+            True if a cache file existed and was deleted, False otherwise.
+        """
+        cache_file = self._get_cache_file(cache_key)
+        if not cache_file.exists():
+            self.logger.debug(f"Cache delete skipped (file not found): {cache_key}")
+            return False
+
+        try:
+            cache_file.unlink()
+            self.logger.info(f"🗑️ Cache invalidated: {cache_key}")
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Error deleting cache file {cache_key}: {e}")
+            return False
+
     def list_cache_files(self) -> list[dict]:
         """List all cache files with metadata."""
         cache_files = []

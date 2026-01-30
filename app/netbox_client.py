@@ -139,6 +139,12 @@ class NetBoxClient:
             )
         return results[0]
 
+    def get_interface(self, interface_id: int) -> dict:
+        """Get a single interface by ID (fresh read, no cache)."""
+        if not isinstance(interface_id, int):
+            raise RuntimeError("interface_id must be an integer")
+        return self._get(f"/api/dcim/interfaces/{interface_id}/")
+
     def get_interfaces_for_device(self, device_id: int) -> list[dict]:
         """Get all interfaces for a specific device with caching support."""
         cache_key = f"netbox_device_{device_id}_interfaces"

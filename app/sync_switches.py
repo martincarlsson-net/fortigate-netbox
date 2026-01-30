@@ -26,6 +26,8 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
     - In normal mode: no changes are made to NetBox; only validation and reporting.
     - In TEST_SWITCH mode (only_switch_name is set): NetBox VLAN updates may be applied,
       limited by runtime.max_netbox_updates, then the program stops (kill-switch).
+    - After each PATCH, the device interface cache is invalidated and the updated interface
+      is re-read to verify the change was applied.
 
     Notes:
     - This module no longer uses storage.py snapshots; it operates directly
@@ -80,16 +82,13 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
                 print(f"Missing switch in NetBox: name={sw.name}", file=sys.stderr)
                 return 1
 
-            interfaces = nb_client.get_interfaces_for_device(device_id=device["id"])
+            device_id = device["id"]
+            interfaces = nb_client.get_interfaces_for_device(device_id=device_id)
             mismatches = validate_switch_vlans(sw, interfaces)
 
             # Kill-switch: only apply NetBox updates in TEST_SWITCH mode, then stop after N updates.
             if only_switch_name and mismatches:
-                if settings.use_cached_data:
-                    logger.warning(
-                        "use_cached_data=true while applying updates; NetBox interface cache may be stale. "
-                        "Set runtime.use_cached_data=false during write testing."
-                    )
+                interfaces_cache_key = f"netbox_device_{device_id}_interfaces"
 
                 max_updates = int(getattr(settings, "max_netbox_updates", 1))
                 if max_updates <= 0:
@@ -117,6 +116,55 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
                         native_vlan_vid=m.get("desired_native_vid"),
                         tagged_vlan_vids=list(m.get("desired_tagged_vids") or []),
                     )
+
+                    # Invalidate cached device interfaces so subsequent reads reflect the update.
+                    if cache_manager:
+                        cache_manager.delete(interfaces_cache_key)
+
+                    # Optional verification: re-read the updated interface and confirm desired state.
+                    updated_iface = nb_client.get_interface(iface_id)
+                    updated_mode = (updated_iface.get("mode") or {}).get("value")
+                    untagged = updated_iface.get("untagged_vlan") or {}
+                    updated_native_vid = untagged.get("vid")
+                    tagged = updated_iface.get("tagged_vlans") or []
+                    updated_tagged_vids = sorted(
+                        [v.get("vid") for v in tagged if isinstance(v, dict) and isinstance(v.get("vid"), int)]
+                    )
+
+                    desired_mode = str(m.get("desired_mode") or "tagged")
+                    desired_native_vid = m.get("desired_native_vid")
+                    desired_tagged_vids = sorted(list(m.get("desired_tagged_vids") or []))
+
+                    if (
+                        str(updated_mode).lower() != desired_mode.lower()
+                        or updated_native_vid != desired_native_vid
+                        or updated_tagged_vids != desired_tagged_vids
+                    ):
+                        logger.error(
+                            "Post-update verification failed for %s/%s (iface=%s): "
+                            "desired mode=%s native_vid=%s tagged_vids=%s, "
+                            "got mode=%s native_vid=%s tagged_vids=%s",
+                            sw.name,
+                            m.get("port"),
+                            iface_id,
+                            desired_mode,
+                            desired_native_vid,
+                            desired_tagged_vids,
+                            updated_mode,
+                            updated_native_vid,
+                            updated_tagged_vids,
+                        )
+                    else:
+                        logger.info(
+                            "Post-update verification OK for %s/%s (iface=%s): mode=%s native_vid=%s tagged_vids=%s",
+                            sw.name,
+                            m.get("port"),
+                            iface_id,
+                            updated_mode,
+                            updated_native_vid,
+                            updated_tagged_vids,
+                        )
+
                     applied += 1
 
                     if applied >= max_updates:
