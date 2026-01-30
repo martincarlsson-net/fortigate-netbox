@@ -78,9 +78,14 @@ def _load_settings_from_yaml(path: str) -> Settings:
         raise RuntimeError(f"APP_CONFIG_FILE not found: {path}")
 
     try:
-        raw = yaml.safe_load(p.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise RuntimeError(f"Failed to read YAML config: {path}") from exc
+        raw_text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"Failed to read YAML config file: {path}: {exc}") from exc
+
+    try:
+        raw = yaml.safe_load(raw_text)
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"Failed to parse YAML config: {path}: {exc}") from exc
 
     if not isinstance(raw, dict):
         raise RuntimeError("YAML config root must be a mapping/object")
