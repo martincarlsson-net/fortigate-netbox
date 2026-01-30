@@ -22,28 +22,27 @@ def _port_sort_key(name: str) -> Tuple[str, int]:
     return (s, 0)
 
 
-def _normalize_vlan_name(name: Optional[str]) -> Optional[str]:
-    """Normalize VLAN names across NetBox and FortiGate.
+def _extract_vlan_vid(value: object) -> Optional[int]:
+    """Extract vlan vid as integer from values like 'vlan31', 'VLAN-31', '31'."""
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
 
-    Examples:
-      - "vlan31" -> "VLAN-31"
-      - "VLAN-31" -> "VLAN-31"
-      - "VLAN-31 (31)" -> "VLAN-31"
-    """
-    if not name:
+    s = str(value).strip()
+    if not s:
         return None
 
-    s = str(name).strip()
-
-    m = re.match(r"^vlan[- ]?(\d+)$", s, flags=re.IGNORECASE)
+    m = re.match(r"^(?:vlan[- ]?)?(\d+)$", s, flags=re.IGNORECASE)
     if m:
-        return f"VLAN-{int(m.group(1))}"
+        return int(m.group(1))
 
-    m = re.match(r"^vlan[- ]?(\d+)\s*\(\d+\)$", s, flags=re.IGNORECASE)
+    # NetBox sometimes provides 'display' like 'VLAN-31 (31)'
+    m = re.match(r"^(?:vlan[- ]?)?(\d+)\s*\(\d+\)$", s, flags=re.IGNORECASE)
     if m:
-        return f"VLAN-{int(m.group(1))}"
+        return int(m.group(1))
 
-    return s
+    return None
 
 
 def _extract_netbox_mode(iface: dict) -> Optional[str]:
@@ -64,8 +63,8 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
           "port_name_lower": {
             "id": 123,
             "name": "Port1",
-            "native_vlan": "VLAN-31" or None,
-            "tagged_vlans": ["VLAN-50", ...] or ["*"] for tagged-all,
+            "native_vlan_vid": 31 or None,
+            "tagged_vlan_vids": [50, ...] or ["*"] for tagged-all,
             "mode": "access" | "tagged" | "tagged-all" | "unknown"
           },
           ...
@@ -73,10 +72,10 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
 
     Notes:
       - Port names are matched case-insensitively.
-      - VLAN names are normalized so FortiGate-style "vlan31" matches NetBox-style "VLAN-31".
-      - mode=access: tagged_vlans=[]
-      - mode=tagged: tagged_vlans=explicit list from tagged_vlans field
-      - mode=tagged-all: tagged_vlans=["*"]
+      - VLANs are represented by vid integers (not names) to avoid dependency on naming.
+      - mode=access: tagged_vlan_vids=[]
+      - mode=tagged: tagged_vlan_vids=explicit list from tagged_vlans field
+      - mode=tagged-all: tagged_vlan_vids=["*"]
     """
     mapping: Dict[str, Dict[str, object]] = {}
 
@@ -100,35 +99,38 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
         tagged = iface.get("tagged_vlans") or []
         mode = _extract_netbox_mode(iface)
 
-        native_name: Optional[str] = None
+        native_vid: Optional[int] = None
         if isinstance(untagged, dict):
-            native_name = _normalize_vlan_name(untagged.get("name") or untagged.get("display"))
+            native_vid = untagged.get("vid")
+            if not isinstance(native_vid, int):
+                native_vid = _extract_vlan_vid(untagged.get("name") or untagged.get("display"))
 
-        tagged_set = set()
+        tagged_set: set[int] = set()
         for v in tagged:
             if not isinstance(v, dict):
                 continue
-            vn = _normalize_vlan_name(v.get("name") or v.get("display"))
-            if vn:
-                tagged_set.add(vn)
+            vv = v.get("vid")
+            if not isinstance(vv, int):
+                vv = _extract_vlan_vid(v.get("name") or v.get("display"))
+            if isinstance(vv, int):
+                tagged_set.add(vv)
 
         # NetBox semantics by mode:
         # - access: only untagged_vlan, tagged_vlans ignored/empty
         # - tagged: untagged_vlan (native) + tagged_vlans (explicit tagged VLANs)
         # - tagged-all: untagged_vlan (native), tagged_vlans empty => treat as "*" (all tagged)
         if mode == "tagged-all":
-            tagged_list = ["*"]
+            tagged_list: List[object] = ["*"]
         elif mode == "access":
             tagged_list = []
         else:
-            # tagged (or unknown): use explicit tagged_vlans list
             tagged_list = sorted(tagged_set)
 
         mapping[key] = {
             "id": iface_id,
             "name": raw_name,
-            "native_vlan": native_name,
-            "tagged_vlans": tagged_list,
+            "native_vlan_vid": native_vid,
+            "tagged_vlan_vids": tagged_list,
             "mode": mode or "unknown",
         }
 
@@ -137,7 +139,7 @@ def _extract_netbox_vlan_info(interfaces: List[dict]) -> Dict[str, Dict[str, obj
 
 def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List[dict]:
     """Compare FortiGate switch VLAN configuration with NetBox for a single switch.
-    
+
     Returns:
         List of mismatch dictionaries, each containing:
         - switch: switch name
@@ -145,8 +147,8 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
         - netbox_interface_id: NetBox interface ID
         - netbox_interface_name: NetBox interface name
         - desired_mode: 'access' or 'tagged'
-        - desired_native_vlan: VLAN name or None
-        - desired_tagged_vlans: list of VLAN names
+        - desired_native_vid: vlan vid (int) or None
+        - desired_tagged_vids: list of vlan vids (int)
     """
 
     nb_map = _extract_netbox_vlan_info(netbox_interfaces)
@@ -163,14 +165,14 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
             )
             continue
 
-        nb_native = nb_port["native_vlan"]
-        nb_tagged = nb_port["tagged_vlans"]
+        nb_native = nb_port["native_vlan_vid"]
+        nb_tagged = nb_port["tagged_vlan_vids"]
         nb_mode = nb_port.get("mode")
         nb_iface_id = nb_port.get("id")
 
         fg_tagged_raw = list(fg_port.allowed_vlans)  # now treated as tagged VLANs
-        fg_native = _normalize_vlan_name(fg_port.native_vlan)
-        fg_tagged = sorted({v for v in (_normalize_vlan_name(v) for v in fg_tagged_raw) if v})
+        fg_native = _extract_vlan_vid(fg_port.native_vlan)
+        fg_tagged = sorted({v for v in (_extract_vlan_vid(v) for v in fg_tagged_raw) if isinstance(v, int)})
 
         # Tagged-all handling: if either side says "*" treat it as tagged-all and only compare native VLAN
         fg_is_all = "*" in fg_tagged_raw
@@ -178,7 +180,7 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
         if fg_is_all or nb_is_all:
             if fg_native != nb_native:
                 logger.error(
-                    "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native=%s tagged=ALL, NB native=%s tagged=ALL",
+                    "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native_vid=%s tagged=ALL, NB native_vid=%s tagged=ALL",
                     switch.name,
                     port_name,
                     nb_port.get("name"),
@@ -193,13 +195,13 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
                         "netbox_interface_id": nb_iface_id,
                         "netbox_interface_name": nb_port.get("name"),
                         "desired_mode": "tagged",  # conservative default for now
-                        "desired_native_vlan": fg_native,
-                        "desired_tagged_vlans": [],  # tagged-all not handled yet
+                        "desired_native_vid": fg_native,
+                        "desired_tagged_vids": [],  # tagged-all not handled yet
                     }
                 )
             else:
                 logger.info(
-                    "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native=%s, tagged=ALL)",
+                    "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native_vid=%s, tagged=ALL)",
                     switch.name,
                     port_name,
                     nb_port.get("name"),
@@ -210,8 +212,8 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
 
         if fg_native != nb_native or fg_tagged != nb_tagged:
             logger.error(
-                "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native=%s tagged=%s, "
-                "NB native=%s tagged=%s",
+                "VLAN mismatch for %s/%s (NetBox iface=%s, mode=%s): FG native_vid=%s tagged_vids=%s, "
+                "NB native_vid=%s tagged_vids=%s",
                 switch.name,
                 port_name,
                 nb_port.get("name"),
@@ -229,13 +231,13 @@ def validate_switch_vlans(switch: Switch, netbox_interfaces: List[dict]) -> List
                     "netbox_interface_id": nb_iface_id,
                     "netbox_interface_name": nb_port.get("name"),
                     "desired_mode": desired_mode,
-                    "desired_native_vlan": fg_native,
-                    "desired_tagged_vlans": fg_tagged,
+                    "desired_native_vid": fg_native,
+                    "desired_tagged_vids": fg_tagged,
                 }
             )
         else:
             logger.info(
-                "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native=%s, tagged=%s)",
+                "VLANs match for %s/%s (NetBox iface=%s, mode=%s, native_vid=%s, tagged_vids=%s)",
                 switch.name,
                 port_name,
                 nb_port.get("name"),

@@ -85,6 +85,12 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
 
             # Kill-switch: only apply NetBox updates in TEST_SWITCH mode, then stop after N updates.
             if only_switch_name and mismatches:
+                if settings.use_cached_data:
+                    logger.warning(
+                        "use_cached_data=true while applying updates; NetBox interface cache may be stale. "
+                        "Set runtime.use_cached_data=false during write testing."
+                    )
+
                 max_updates = int(getattr(settings, "max_netbox_updates", 1))
                 if max_updates <= 0:
                     logger.warning(
@@ -108,8 +114,8 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
                     nb_client.update_interface_vlan_config(
                         interface_id=iface_id,
                         mode=str(m.get("desired_mode") or "tagged"),
-                        native_vlan_name=m.get("desired_native_vlan"),
-                        tagged_vlan_names=list(m.get("desired_tagged_vlans") or []),
+                        native_vlan_vid=m.get("desired_native_vid"),
+                        tagged_vlan_vids=list(m.get("desired_tagged_vids") or []),
                     )
                     applied += 1
 

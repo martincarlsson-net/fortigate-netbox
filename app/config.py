@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -35,23 +36,38 @@ class Settings:
     sync_data_dir: Path
     cache_dir: Path
     use_cached_data: bool
-    vlan_translations: Dict[str, str]
+    vlan_translations: Dict[str, int]
     log_level: str = "INFO"
     test_switch: Optional[str] = None
     max_netbox_updates: int = 1
 
 
-def _parse_vlan_translations(raw: object) -> Dict[str, str]:
-    """Parse vlan_translations from YAML (dict or null)."""
+def _parse_vlan_translations(raw: object) -> Dict[str, int]:
+    """Parse vlan_translations from YAML (dict or null) into vid integers."""
     if raw is None:
         return {}
     if isinstance(raw, dict):
-        out: Dict[str, str] = {}
+        out: Dict[str, int] = {}
         for k, v in raw.items():
-            if isinstance(k, str) and isinstance(v, str) and k and v:
-                out[k] = v
+            if not isinstance(k, str) or not k.strip():
+                continue
+
+            vid: Optional[int] = None
+            if isinstance(v, int):
+                vid = v
+            elif isinstance(v, str) and v.strip():
+                # Allow "31" or "VLAN-31" or "vlan31" in config, but normalize to integer vid
+                m = re.match(r"^(?:vlan[- ]?)?(\d+)$", v.strip(), flags=re.IGNORECASE)
+                if m:
+                    vid = int(m.group(1))
+
+            if vid is not None:
+                out[k.strip()] = vid
+
         return out
-    raise RuntimeError("vlan_translations must be a mapping of fortigate_name -> netbox_name")
+    raise RuntimeError(
+        "vlan_translations must be a mapping of fortigate_name -> netbox_vlan_vid (integer)"
+    )
 
 
 def _load_settings_from_yaml(path: str) -> Settings:
@@ -121,7 +137,7 @@ def _load_settings_from_yaml(path: str) -> Settings:
     else:
         use_cached_data = False
 
-    # VLAN translations
+    # VLAN translations (now VID-based)
     vlan_translations = _parse_vlan_translations(raw.get("vlan_translations"))
 
     # FortiGate devices

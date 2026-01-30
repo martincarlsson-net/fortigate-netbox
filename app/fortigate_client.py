@@ -25,12 +25,12 @@ class FortiGateClient:
         password: Optional[str] = None,
         verify_ssl: bool = True,
         cache_manager: Optional[CacheManager] = None,
-        vlan_translations: Optional[Dict[str, str]] = None,
+        vlan_translations: Optional[Dict[str, int]] = None,
     ):
         self.host = host
         self.verify_ssl = verify_ssl
         self.cache_manager = cache_manager
-        self.vlan_translations: Dict[str, str] = vlan_translations or {}
+        self.vlan_translations: Dict[str, int] = vlan_translations or {}
         self.base_url = f"https://{host}".rstrip("/")
 
         self.session = requests.Session()
@@ -73,37 +73,35 @@ class FortiGateClient:
         return data
 
     @staticmethod
-    def _normalize_vlan_name(name: Optional[str]) -> Optional[str]:
-        """Normalize VLAN names: vlan31 -> VLAN-31."""
-        if not name:
+    def _extract_vlan_vid(value: object) -> Optional[int]:
+        """Extract vlan vid as integer from values like 'vlan31', 'VLAN-31', '31'."""
+        if value is None:
             return None
-        s = str(name).strip()
-        m = re.match(r"^vlan[- ]?(\d+)$", s, flags=re.IGNORECASE)
+        if isinstance(value, int):
+            return value
+        s = str(value).strip()
+        if not s:
+            return None
+        m = re.match(r"^(?:vlan[- ]?)?(\d+)$", s, flags=re.IGNORECASE)
         if m:
-            return f"VLAN-{int(m.group(1))}"
-        return s
+            return int(m.group(1))
+        return None
 
-    def _translate_vlan(self, name: Optional[str]) -> Optional[str]:
-        """Translate FortiGate VLAN names to NetBox VLAN names.
-
-        Translation is applied in two passes:
-        1. Check raw FortiGate name (e.g. "_default" -> "VLAN-1")
-        2. Normalize then check again (e.g. "vlan90" -> "VLAN-90" -> translation if mapped)
-        """
+    def _translate_vlan_to_vid(self, name: Optional[str]) -> Optional[int]:
+        """Translate FortiGate VLAN names to NetBox VLAN vid (integer)."""
         if not name:
             return None
         raw = str(name).strip()
-        # Allow mapping in terms of raw FortiGate name (e.g. "_default")
+
+        # Allow mapping in terms of raw FortiGate name (e.g. "_default": 1)
         if raw in self.vlan_translations:
             return self.vlan_translations[raw]
-        norm = self._normalize_vlan_name(raw)
-        if not norm:
-            return None
-        # Also allow mapping after normalization (e.g. "VLAN-90" -> "SomeName")
-        return self.vlan_translations.get(norm, norm)
+
+        # Fallback: parse vlan vid from the string itself
+        return self._extract_vlan_vid(raw)
 
     def _normalize_port_vlans(self, port: Dict[str, Any]) -> Dict[str, Any]:
-        """Extract native + tagged VLAN names from a FortiGate port dict.
+        """Extract native + tagged VLAN vids from a FortiGate port dict.
 
         Mapping:
           - native_vlan: from 'vlan' field
@@ -112,22 +110,22 @@ class FortiGateClient:
         """
 
         # Native VLAN from 'vlan' field
-        native_vlan = self._translate_vlan(port.get("vlan"))
+        native_vlan = self._translate_vlan_to_vid(port.get("vlan"))
 
         # Tagged-all: allowed-vlans-all=enable
         if str(port.get("allowed-vlans-all", "")).strip().lower() == "enable":
             return {"native_vlan": native_vlan, "allowed_vlans": ["*"]}
 
         # Tagged VLANs: allowed-vlans (excluding native)
-        tagged_vlans: List[str] = []
+        tagged_vlans: List[int] = []
         for vlan_obj in port.get("allowed-vlans", []) or []:
             if not isinstance(vlan_obj, dict):
                 continue
             vlan_name = vlan_obj.get("vlan-name")
             if not isinstance(vlan_name, str) or not vlan_name:
                 continue
-            norm = self._translate_vlan(vlan_name)
-            if norm and norm != native_vlan:
+            norm = self._translate_vlan_to_vid(vlan_name)
+            if isinstance(norm, int) and norm != native_vlan:
                 tagged_vlans.append(norm)
 
         return {"native_vlan": native_vlan, "allowed_vlans": tagged_vlans}

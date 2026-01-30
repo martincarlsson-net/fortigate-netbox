@@ -26,7 +26,7 @@ runtime:
   test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")
   max_netbox_updates: 1  # Kill-switch: stop after updating N mismatching ports (set to 3 later, etc.)
 
-# Optional: Map FortiGate VLAN names to NetBox VLAN names
+# Optional: Map FortiGate VLAN names to NetBox VLAN vid (integer)
 vlan_translations:
-  _default: "VLAN-1"
-  # quarantine: "VLAN-90"
+  _default: 1
+  # quarantine: 90
