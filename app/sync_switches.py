@@ -23,7 +23,9 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
     - If only_switch_name is provided, only that switch is validated.
     - If a switch cannot be found in NetBox (by name), stop execution and
       print concise details about the missing switch.
-    - No changes are made to NetBox; only validation and reporting.
+    - In normal mode: no changes are made to NetBox; only validation and reporting.
+    - In TEST_SWITCH mode (only_switch_name is set): NetBox VLAN updates may be applied,
+      limited by runtime.max_netbox_updates, then the program stops (kill-switch).
 
     Notes:
     - This module no longer uses storage.py snapshots; it operates directly
@@ -79,7 +81,45 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
                 return 1
 
             interfaces = nb_client.get_interfaces_for_device(device_id=device["id"])
-            validate_switch_vlans(sw, interfaces)
+            mismatches = validate_switch_vlans(sw, interfaces)
+
+            # Kill-switch: only apply NetBox updates in TEST_SWITCH mode, then stop after N updates.
+            if only_switch_name and mismatches:
+                max_updates = int(getattr(settings, "max_netbox_updates", 1))
+                if max_updates <= 0:
+                    logger.warning(
+                        "TEST_SWITCH mode active, but max_netbox_updates=%s; no NetBox updates will be performed.",
+                        max_updates,
+                    )
+                    return 0
+
+                applied = 0
+                for m in mismatches:
+                    iface_id = m.get("netbox_interface_id")
+                    if not isinstance(iface_id, int):
+                        logger.error(
+                            "Skipping NetBox update for %s/%s: missing NetBox interface id (got %r)",
+                            sw.name,
+                            m.get("port"),
+                            iface_id,
+                        )
+                        continue
+
+                    nb_client.update_interface_vlan_config(
+                        interface_id=iface_id,
+                        mode=str(m.get("desired_mode") or "tagged"),
+                        native_vlan_name=m.get("desired_native_vlan"),
+                        tagged_vlan_names=list(m.get("desired_tagged_vlans") or []),
+                    )
+                    applied += 1
+
+                    if applied >= max_updates:
+                        logger.warning(
+                            "Kill-switch active: updated %s mismatching port(s) on %s; stopping now.",
+                            applied,
+                            sw.name,
+                        )
+                        return 0
 
     if only_switch_name and not matched_any:
         logger.error("Switch %s not found on any configured FortiGate.", only_switch_name)
