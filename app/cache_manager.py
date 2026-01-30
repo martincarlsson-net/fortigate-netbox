@@ -86,21 +86,6 @@ class CacheManager:
         except Exception as e:
             self.logger.error(f"❌ Error writing cache file {cache_key}: {e}")
     
-    def delete(self, cache_key: str) -> None:
-        """Delete a cache file."""
-        cache_file = self._get_cache_file(cache_key)
-        if cache_file.exists():
-            cache_file.unlink()
-            self.logger.info(f"🗑️  Cache deleted: {cache_key}")
-    
-    def clear_all(self) -> None:
-        """Delete all cache files."""
-        count = 0
-        for cache_file in self.cache_dir.glob("*.pickle"):
-            cache_file.unlink()
-            count += 1
-        self.logger.info(f"🗑️  Deleted {count} cache files")
-    
     def list_cache_files(self) -> list[dict]:
         """List all cache files with metadata."""
         cache_files = []
