@@ -1,14 +1,9 @@
-import json
-import logging
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
-
-logger = logging.getLogger(__name__)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -43,6 +38,7 @@ class Settings:
     vlan_translations: Dict[str, str]
     log_level: str = "INFO"
     test_switch: Optional[str] = None
+    max_netbox_updates: int = 1
 
 
 def _parse_vlan_translations(raw: object) -> Dict[str, str]:
@@ -103,6 +99,14 @@ def _load_settings_from_yaml(path: str) -> Settings:
     if test_switch is not None and not isinstance(test_switch, str):
         raise RuntimeError("runtime.test_switch must be a string or null")
 
+    max_netbox_updates_raw = runtime.get("max_netbox_updates", 1)
+    try:
+        max_netbox_updates = int(max_netbox_updates_raw)
+    except Exception as exc:
+        raise RuntimeError("runtime.max_netbox_updates must be an integer") from exc
+    if max_netbox_updates < 0:
+        raise RuntimeError("runtime.max_netbox_updates must be >= 0")
+
     sync_data_dir = Path(str(runtime.get("sync_data_dir", "/app/data")))
     sync_data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -159,6 +163,7 @@ def _load_settings_from_yaml(path: str) -> Settings:
         vlan_translations=vlan_translations,
         log_level=log_level,
         test_switch=test_switch.strip() if isinstance(test_switch, str) and test_switch.strip() else None,
+        max_netbox_updates=max_netbox_updates,
     )
 
 
