@@ -21,9 +21,10 @@ fortigates:
 runtime:
   sync_data_dir: "/app/data"
   cache_dir: "/app/data/cache"
-  use_cached_data: true
+  use_cached_data: false
   log_level: "INFO"
-  test_switch: null  # Set to switch name for test mode (e.g. "TEST-SW01")
+  test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")
+  max_netbox_updates: 1  # Kill-switch: stop after updating N mismatching ports (set to 3 later, etc.)
 
 # Optional: Map FortiGate VLAN names to NetBox VLAN names
 vlan_translations:
