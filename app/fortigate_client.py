@@ -44,13 +44,6 @@ class FortiGateClient:
 
         self.logger = logging.getLogger(f"{__name__}.{host}")
 
-    def _get(self, path: str) -> Dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        self.logger.info("Requesting FortiGate endpoint %s", url)
-        resp = self.session.get(url, timeout=15, verify=self.verify_ssl)
-        resp.raise_for_status()
-        return resp.json()
-
     def get_managed_switches_raw(self) -> Dict[str, Any]:
         """Return the raw FortiGate response for managed switches.
 
@@ -78,14 +71,6 @@ class FortiGateClient:
             self.cache_manager.set(cache_key, data)
 
         return data
-
-    def get_managed_switches(self) -> list[dict]:
-        """Get all managed FortiSwitch devices.
-
-        Returns the `results` list from the raw API response.
-        """
-        data = self.get_managed_switches_raw()
-        return data.get("results", [])
 
     @staticmethod
     def _normalize_vlan_name(name: Optional[str]) -> Optional[str]:
