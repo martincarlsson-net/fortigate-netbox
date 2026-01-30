@@ -10,6 +10,9 @@ from .models import Switch, SwitchPort
 
 logger = logging.getLogger(__name__)
 
+import urllib3
+# disable insecure HTTPS warnings (self-signed certs)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 class FortiGateClient:
     """Minimal FortiGate client for retrieving managed switch data."""
