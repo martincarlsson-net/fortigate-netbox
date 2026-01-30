@@ -21,6 +21,7 @@ fortigates:
 runtime:
   sync_data_dir: "/app/data"
   cache_dir: "/app/data/cache"
+  log_dir: "/app/data/logs"
   use_cached_data: false
   log_level: "INFO"
   test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")

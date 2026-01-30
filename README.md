@@ -5,7 +5,7 @@ Python application to validate and (in future versions) synchronize switch port 
 ### Modules overview
 
 - **`app/config.py`**: Loads configuration from a YAML file (recommended) or environment variables and a FortiGate devices JSON file (legacy). Resolves API tokens from files or direct values and prepares a `Settings` object (FortiGate inventory, NetBox URL/token, VLAN translations, data directory, log level).
-- **`app/logging_config.py`**: Central logging setup. Configures a simple console logger with timestamp, level, and logger name, honoring the `LOG_LEVEL` setting.
+- **`app/logging_config.py`**: Central logging setup. Configures console and file logging with timestamp, level, and logger name, honoring the `LOG_LEVEL` setting.
 - **`app/models.py`**: Defines normalized data models:
   - `Switch`: a managed switch.
   - `SwitchPort`: a single port with `name`, `native_vlan`, and `allowed_vlans` (VLANs by name).
@@ -14,6 +14,7 @@ Python application to validate and (in future versions) synchronize switch port 
   - Parses the real FortiGate JSON (e.g. `switch-id`, `ports[].port-name`, `untagged-vlans`, `allowed-vlans`, `allowed-vlans-all`).
   - Applies VLAN name translations (e.g. `_default` → `VLAN-1`).
   - Normalizes switches into `Switch`/`SwitchPort` models.
+  - Supports caching of FortiGate API responses.
 - **`app/netbox_client.py`**: Read-only NetBox client that:
   - Looks up devices by name.
   - Retrieves all interfaces for a device, including VLAN fields (`untagged_vlan`, `tagged_vlans`).
@@ -70,6 +71,7 @@ fortigates:
 runtime:
   sync_data_dir: "/app/data"
   cache_dir: "/app/data/cache"
+  log_dir: "/app/data/logs"
   use_cached_data: true
   log_level: "INFO"
   test_switch: null  # Set to switch name for test mode (e.g. "AEX-ARN-UT2-SW01")
@@ -82,6 +84,18 @@ vlan_translations:
 
 See `config.example.yml` for a full template.
 
+**Log files:**
+- Each script run creates a timestamped log file in `log_dir` (default: `/app/data/logs`)
+- Format: `fg-nb-log_YYYY-MM-DD__HH_MM_SS.log`
+- All console output is duplicated to the log file
+- Mount the log directory when running: `-v "$(pwd)/logs:/app/data/logs"`
+
+**Caching:**
+- When `use_cached_data: true`, both FortiGate API responses and NetBox data are cached
+- FortiGate cache keys include device name and host for uniqueness
+- Cached data persists across runs until you set `use_cached_data: false`
+- Cache directory: `cache_dir` (default: `/app/data/cache`)
+
 **Running with YAML config:**
 
 ```bash
@@ -89,6 +103,7 @@ docker run --rm \
   -e APP_CONFIG_FILE=/app/config.yml \
   -v "$(pwd)/config.yml:/app/config.yml:ro" \
   -v "$(pwd)/cache:/app/data/cache" \
+  -v "$(pwd)/logs:/app/data/logs" \
   fortigate-netbox:latest
 ```
 
@@ -230,6 +245,7 @@ docker run --rm \
   -e APP_CONFIG_FILE=/app/config.yml \
   -v "$(pwd)/config.yml:/app/config.yml:ro" \
   -v "$(pwd)/cache:/app/data/cache" \
+  -v "$(pwd)/logs:/app/data/logs" \
   fortigate-netbox:latest
 ```
 
@@ -243,6 +259,7 @@ docker run --rm \
   -v "$(pwd)/fortigate_devices.json:/app/fortigate_devices.json:ro" \
   -v "$(pwd)/secrets:/app/secrets:ro" \
   -v "$(pwd)/cache:/app/data/cache" \
+  -v "$(pwd)/logs:/app/data/logs" \
   fortigate-netbox:latest
 ```
 
@@ -255,6 +272,7 @@ docker run --rm \
   -v "$(pwd)/fortigate_devices.json:/app/fortigate_devices.json:ro" \
   -v "$(pwd)/secrets:/app/secrets:ro" \
   -v /var/lib/fortigate-netbox/data:/app/data \
+  -v "$(pwd)/logs:/app/data/logs" \
   -e FG_DEVICES_FILE=/app/fortigate_devices.json \
   -e NETBOX_URL=https://netbox.example.com \
   -e NETBOX_API_TOKEN=your_token_here \
@@ -273,6 +291,7 @@ Typical cron entry to run daily at 02:00 using YAML config:
   -e APP_CONFIG_FILE=/app/config.yml \
   -v "$(pwd)/config.yml:/app/config.yml:ro" \
   -v "$(pwd)/cache:/app/data/cache" \
+  -v "$(pwd)/logs:/app/data/logs" \
   fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
 ```
 
@@ -284,6 +303,7 @@ Or with the legacy `env.production` file:
   -v "$(pwd)/fortigate_devices.json:/app/fortigate_devices.json:ro" \
   -v "$(pwd)/secrets:/app/secrets:ro" \
   -v "$(pwd)/cache:/app/data/cache" \
+  -v "$(pwd)/logs:/app/data/logs" \
   fortigate-netbox:latest >> /var/log/fortigate-netbox.log 2>&1
 ```
 
@@ -294,6 +314,7 @@ Or with explicit environment variables:
   -v /home/user/fortigate-netbox/fortigate_devices.json:/app/fortigate_devices.json:ro \
   -v /home/user/fortigate-netbox/secrets:/app/secrets:ro \
   -v /var/lib/fortigate-netbox/data:/app/data \
+  -v /home/user/fortigate-netbox/logs:/app/data/logs \
   -e FG_DEVICES_FILE=/app/fortigate_devices.json \
   -e NETBOX_URL=https://netbox.example.com \
   -e NETBOX_API_TOKEN=your_token_here \

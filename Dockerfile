@@ -15,10 +15,13 @@ COPY app/ app/
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
+# Create log directory and ensure appuser can write to it
+RUN mkdir -p /app/data/logs && \
+    chown -R appuser:appuser /app/data
+
 ENV PYTHONUNBUFFERED=1
 
 USER appuser
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["python", "-m", "app.main"]
-

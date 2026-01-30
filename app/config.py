@@ -35,6 +35,7 @@ class Settings:
     netbox_timeout: int
     sync_data_dir: Path
     cache_dir: Path
+    log_dir: Path
     use_cached_data: bool
     vlan_translations: Dict[str, int]
     log_level: str = "INFO"
@@ -129,6 +130,9 @@ def _load_settings_from_yaml(path: str) -> Settings:
     cache_dir = Path(str(runtime.get("cache_dir", "/app/data/cache")))
     cache_dir.mkdir(parents=True, exist_ok=True)
 
+    log_dir = Path(str(runtime.get("log_dir", "/app/data/logs")))
+    log_dir.mkdir(parents=True, exist_ok=True)
+
     use_cached_data_raw = runtime.get("use_cached_data", False)
     if isinstance(use_cached_data_raw, bool):
         use_cached_data = use_cached_data_raw
@@ -175,6 +179,7 @@ def _load_settings_from_yaml(path: str) -> Settings:
         netbox_timeout=netbox_timeout,
         sync_data_dir=sync_data_dir,
         cache_dir=cache_dir,
+        log_dir=log_dir,
         use_cached_data=use_cached_data,
         vlan_translations=vlan_translations,
         log_level=log_level,

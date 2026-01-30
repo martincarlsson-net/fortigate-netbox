@@ -14,8 +14,8 @@ def main() -> int:
     # Load settings first to get log level
     settings = load_settings()
     
-    # Configure logging with the settings log level
-    configure_logging(settings.log_level)
+    # Configure logging with the settings log level and log directory
+    configure_logging(settings.log_level, log_dir=settings.log_dir)
 
     # Initialize cache manager (currently used for cache visibility/logging).
     cache_manager = CacheManager(

@@ -19,6 +19,7 @@ class FortiGateClient:
 
     def __init__(
         self,
+        name: str,
         host: str,
         api_token: Optional[str] = None,
         username: Optional[str] = None,
@@ -27,6 +28,7 @@ class FortiGateClient:
         cache_manager: Optional[CacheManager] = None,
         vlan_translations: Optional[Dict[str, int]] = None,
     ):
+        self.name = name
         self.host = host
         self.verify_ssl = verify_ssl
         self.cache_manager = cache_manager
@@ -50,7 +52,7 @@ class FortiGateClient:
         This keeps compatibility with earlier code that expected a dict
         containing a top-level `results` key.
         """
-        cache_key = f"fortigate_{self.host}_managed_switches_raw"
+        cache_key = f"fortigate_{self.name}_{self.host}_managed_switches_raw"
 
         if self.cache_manager:
             cached = self.cache_manager.get(cache_key)

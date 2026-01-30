@@ -53,9 +53,11 @@ def run_sync(settings: Settings, *, only_switch_name: Optional[str] = None) -> i
     for fg in settings.fortigate_devices:
         logger.info("Processing FortiGate %s (%s)", fg.name, fg.host)
         client = FortiGateClient(
+            name=fg.name,
             host=fg.host,
             api_token=fg.api_token,
             verify_ssl=fg.verify_ssl,
+            cache_manager=cache_manager,
             vlan_translations=settings.vlan_translations,
         )
 
